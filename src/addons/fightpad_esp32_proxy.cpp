@@ -1,0 +1,699 @@
+#include "addons/fightpad_esp32_proxy.h"
+
+#include "helper.h"
+#include "storagemanager.h"
+#include "tusb.h"
+
+#include <algorithm>
+#include <cstring>
+
+namespace {
+constexpr uint8_t kFrameMagic0 = 0x46;
+constexpr uint8_t kFrameMagicReport = 0x50;
+constexpr uint8_t kFrameMagicTransport = 0x54;
+constexpr uint8_t kFrameMagicBattery = 0x42;
+constexpr uint16_t kAdcFullScale = 4095;
+constexpr uint16_t kBatterySampleCount = 8;
+constexpr float kBatteryDividerScale = 2.0f;
+constexpr float kBatteryAdcReferenceMv = 3300.0f;
+}
+
+static FightpadESP32ProxyAddon *activeProxy = nullptr;
+
+#ifndef FIGHTPAD12SLIM_ESP32_PROXY_TRANSPORT_DIAGNOSTIC_PIN
+#define FIGHTPAD12SLIM_ESP32_PROXY_TRANSPORT_DIAGNOSTIC_PIN -1
+#endif
+
+static void setTransportDiagnosticPin(bool bluetoothSelected)
+{
+    if (!isValidPin(FIGHTPAD12SLIM_ESP32_PROXY_TRANSPORT_DIAGNOSTIC_PIN)) {
+        return;
+    }
+
+    gpio_put(
+        FIGHTPAD12SLIM_ESP32_PROXY_TRANSPORT_DIAGNOSTIC_PIN,
+        bluetoothSelected ? 1 : 0);
+}
+
+bool FightpadESP32ProxyAddon::RingBuffer::push(uint8_t value)
+{
+    if (full()) {
+        return false;
+    }
+
+    data[head] = value;
+    head = (head + 1) % FIGHTPAD12SLIM_ESP32_PROXY_BUFFER_SIZE;
+    count++;
+    return true;
+}
+
+bool FightpadESP32ProxyAddon::RingBuffer::pop(uint8_t& value)
+{
+    if (empty()) {
+        return false;
+    }
+
+    value = data[tail];
+    tail = (tail + 1) % FIGHTPAD12SLIM_ESP32_PROXY_BUFFER_SIZE;
+    count--;
+    return true;
+}
+
+bool FightpadESP32ProxyAddon::available()
+{
+#if !FIGHTPAD12SLIM_ESP32_PROXY_ENABLED
+    return false;
+#else
+    loadOptions();
+
+    return isValidPin(txPin) &&
+           isValidPin(rxPin);
+#endif
+}
+
+void FightpadESP32ProxyAddon::setup()
+{
+    loadOptions();
+    refreshTurboPinMask();
+    activeProxy = this;
+
+    if (isValidPin(FIGHTPAD12SLIM_TRANSPORT_SEL_PIN)) {
+        gpio_init(FIGHTPAD12SLIM_TRANSPORT_SEL_PIN);
+        gpio_set_dir(FIGHTPAD12SLIM_TRANSPORT_SEL_PIN, GPIO_IN);
+        gpio_pull_up(FIGHTPAD12SLIM_TRANSPORT_SEL_PIN);
+    }
+
+    if (isValidPin(bootPin)) {
+        gpio_init(bootPin);
+        gpio_set_dir(bootPin, GPIO_IN);
+        gpio_pull_up(bootPin);
+    }
+
+    if (isValidPin(resetPin)) {
+        gpio_init(resetPin);
+        gpio_set_dir(resetPin, GPIO_IN);
+        gpio_pull_up(resetPin);
+    }
+
+    if (isValidPin(FIGHTPAD12SLIM_ESP32_PROXY_TRANSPORT_DIAGNOSTIC_PIN)) {
+        gpio_init(FIGHTPAD12SLIM_ESP32_PROXY_TRANSPORT_DIAGNOSTIC_PIN);
+        gpio_set_dir(FIGHTPAD12SLIM_ESP32_PROXY_TRANSPORT_DIAGNOSTIC_PIN, GPIO_OUT);
+    }
+
+    if (isValidPin(FIGHTPAD12SLIM_VBUS_DET_PIN)) {
+        gpio_init(FIGHTPAD12SLIM_VBUS_DET_PIN);
+        gpio_set_dir(FIGHTPAD12SLIM_VBUS_DET_PIN, GPIO_IN);
+        gpio_disable_pulls(FIGHTPAD12SLIM_VBUS_DET_PIN);
+    }
+
+    if (batteryMonitoringSupported()) {
+        adc_gpio_init(FIGHTPAD12SLIM_VBAT_SENSE_PIN);
+    }
+
+    gpio_set_function(txPin, UART_FUNCSEL_NUM(uart, txPin));
+    gpio_set_function(rxPin, UART_FUNCSEL_NUM(uart, rxPin));
+    uart_init(uart, baudrate);
+    uart_set_format(uart, 8, 1, UART_PARITY_NONE);
+    uart_set_fifo_enabled(uart, true);
+
+    if (useFlowControl && isValidPin(ctsPin) && isValidPin(rtsPin)) {
+        gpio_set_function(ctsPin, GPIO_FUNC_UART);
+        gpio_set_function(rtsPin, GPIO_FUNC_UART);
+        uart_set_hw_flow(uart, true, true);
+    } else {
+        uart_set_hw_flow(uart, false, false);
+    }
+
+    initialized = true;
+    setTransportDiagnosticPin(isBluetoothTransportSelected());
+    sendTransportModeFrame(isBluetoothTransportSelected(), true);
+    sendBatteryStatusFrame(true);
+#if FIGHTPAD12SLIM_ESP32_PROXY_CDC_DESC_ENABLED
+    if (autoDtrRts && isValidPin(resetPin)) {
+        resetESP32(false);
+    }
+#endif
+}
+
+void FightpadESP32ProxyAddon::process()
+{
+    if (!initialized) {
+        return;
+    }
+
+#if FIGHTPAD12SLIM_ESP32_PROXY_CDC_DESC_ENABLED
+    drainCdcToBuffer();
+    drainBufferToUart();
+    drainUartToBuffer();
+    drainBufferToCdc();
+#endif
+}
+
+void FightpadESP32ProxyAddon::postprocess(bool sent)
+{
+    (void)sent;
+
+    sendBatteryStatusFrame();
+
+#if FIGHTPAD12SLIM_ESP32_PROXY_INPUT_REPORT_ENABLED
+    sendInputReportFrame();
+#endif
+}
+
+void FightpadESP32ProxyAddon::reinit()
+{
+    refreshTurboPinMask();
+    lastInputReportValid = false;
+    lastTransportModeValid = false;
+    lastBatteryPercentValid = false;
+    lastBatteryMillivoltsValid = false;
+}
+
+void FightpadESP32ProxyAddon::setUsbLineState(bool dtr, bool rts)
+{
+    lastDtr = dtr;
+    lastRts = rts;
+    applyLineState();
+}
+
+void FightpadESP32ProxyAddon::setUsbLineCoding(uint32_t requestedBaudrate)
+{
+    if (requestedBaudrate == 0 || requestedBaudrate == baudrate) {
+        return;
+    }
+
+    baudrate = requestedBaudrate;
+    if (initialized) {
+        uart_set_baudrate(uart, baudrate);
+    }
+}
+
+void FightpadESP32ProxyAddon::loadOptions()
+{
+#if FIGHTPAD12SLIM_ESP32_PROXY_FORCE_BOARD_DEFAULTS
+    uart = FIGHTPAD12SLIM_ESP32_PROXY_UART;
+    baudrate = FIGHTPAD12SLIM_ESP32_PROXY_UART_BAUD;
+    resetPin = FIGHTPAD12SLIM_ESP32_PROXY_RESET_PIN;
+    bootPin = FIGHTPAD12SLIM_ESP32_PROXY_BOOT_PIN;
+    txPin = FIGHTPAD12SLIM_ESP32_PROXY_UART_TX_PIN;
+    rxPin = FIGHTPAD12SLIM_ESP32_PROXY_UART_RX_PIN;
+    ctsPin = FIGHTPAD12SLIM_ESP32_PROXY_UART_CTS_PIN;
+    rtsPin = FIGHTPAD12SLIM_ESP32_PROXY_UART_RTS_PIN;
+    useFlowControl = FIGHTPAD12SLIM_ESP32_PROXY_USE_FLOW_CONTROL != 0;
+    autoDtrRts = FIGHTPAD12SLIM_ESP32_PROXY_AUTO_DTR_RTS != 0;
+#else
+    const FightpadESP32ProxyOptions& options = Storage::getInstance().getAddonOptions().fightpadESP32ProxyOptions;
+    if (!options.enabled) {
+        txPin = -1;
+        rxPin = -1;
+        return;
+    }
+
+    uart = options.uartBlock == 0 ? uart0 : uart1;
+    baudrate = options.baud == 0 ? FIGHTPAD12SLIM_ESP32_PROXY_UART_BAUD : options.baud;
+    resetPin = options.resetPin;
+    bootPin = options.bootPin;
+    txPin = options.txPin;
+    rxPin = options.rxPin;
+    ctsPin = options.ctsPin;
+    rtsPin = options.rtsPin;
+    useFlowControl = options.useFlowControl;
+    autoDtrRts = options.autoDtrRts;
+#endif
+}
+
+void FightpadESP32ProxyAddon::resetESP32(bool downloadMode)
+{
+    if (isValidPin(bootPin)) {
+        gpio_put(bootPin, downloadMode ? 0 : 1);
+    }
+
+    if (!isValidPin(resetPin)) {
+        return;
+    }
+
+    gpio_put(resetPin, 0);
+    sleep_ms(FIGHTPAD12SLIM_ESP32_PROXY_RESET_PULSE_MS);
+    gpio_put(resetPin, 1);
+    sleep_ms(FIGHTPAD12SLIM_ESP32_PROXY_RESET_PULSE_MS);
+}
+
+void FightpadESP32ProxyAddon::applyLineState()
+{
+    if (!autoDtrRts || !initialized) {
+        return;
+    }
+
+    if (isValidPin(bootPin)) {
+        gpio_put(bootPin, lastDtr ? 0 : 1);
+    }
+    if (isValidPin(resetPin)) {
+        gpio_put(resetPin, lastRts ? 0 : 1);
+    }
+}
+
+void FightpadESP32ProxyAddon::drainCdcToBuffer()
+{
+#if CFG_TUD_CDC
+    if (!tud_cdc_ready() || cdcToUart.full()) {
+        return;
+    }
+
+    uint8_t buffer[64];
+    uint32_t toRead = tud_cdc_available();
+    while (toRead > 0 && cdcToUart.free() > 0) {
+        uint32_t chunk = toRead;
+        if (chunk > sizeof(buffer)) {
+            chunk = sizeof(buffer);
+        }
+        if (chunk > cdcToUart.free()) {
+            chunk = cdcToUart.free();
+        }
+
+        uint32_t read = tud_cdc_read(buffer, chunk);
+        if (read == 0) {
+            break;
+        }
+
+        for (uint32_t i = 0; i < read; i++) {
+            cdcToUart.push(buffer[i]);
+        }
+
+        toRead = tud_cdc_available();
+    }
+#endif
+}
+
+void FightpadESP32ProxyAddon::drainBufferToUart()
+{
+    uint8_t value;
+    while (!cdcToUart.empty() && uart_is_writable(uart)) {
+        if (!cdcToUart.pop(value)) {
+            break;
+        }
+        uart_putc_raw(uart, value);
+    }
+}
+
+void FightpadESP32ProxyAddon::drainUartToBuffer()
+{
+    while (uart_is_readable(uart) && !uartToCdc.full()) {
+        uartToCdc.push(uart_getc(uart));
+    }
+}
+
+void FightpadESP32ProxyAddon::drainBufferToCdc()
+{
+#if CFG_TUD_CDC
+    if (!tud_cdc_ready() || uartToCdc.empty()) {
+        return;
+    }
+
+    uint8_t buffer[64];
+    while (!uartToCdc.empty() && tud_cdc_write_available() > 0) {
+        uint32_t writable = tud_cdc_write_available();
+        uint32_t chunk = writable;
+        if (chunk > sizeof(buffer)) {
+            chunk = sizeof(buffer);
+        }
+        if (chunk > uartToCdc.available()) {
+            chunk = uartToCdc.available();
+        }
+
+        for (uint32_t i = 0; i < chunk; i++) {
+            uartToCdc.pop(buffer[i]);
+        }
+
+        uint32_t written = tud_cdc_write(buffer, chunk);
+        if (written < chunk) {
+            for (uint32_t i = written; i < chunk; i++) {
+                if (!uartToCdc.push(buffer[i])) {
+                    break;
+                }
+            }
+            break;
+        }
+    }
+
+    tud_cdc_write_flush();
+#endif
+}
+
+void FightpadESP32ProxyAddon::refreshTurboPinMask()
+{
+    turboPinMask = 0;
+
+    GpioMappingInfo* pinMappings = Storage::getInstance().getProfilePinMappings();
+    for (Pin_t pin = 0; pin < (Pin_t)NUM_BANK0_GPIOS; pin++) {
+        if (pinMappings[pin].action == GpioAction::BUTTON_PRESS_TURBO) {
+            turboPinMask |= 1 << pin;
+        }
+    }
+}
+
+bool FightpadESP32ProxyAddon::isBluetoothTransportSelected() const
+{
+    if (!isValidPin(FIGHTPAD12SLIM_TRANSPORT_SEL_PIN)) {
+        return true;
+    }
+
+    return gpio_get(FIGHTPAD12SLIM_TRANSPORT_SEL_PIN) == FIGHTPAD12SLIM_TRANSPORT_BT_LEVEL;
+}
+
+void FightpadESP32ProxyAddon::sendTransportModeFrame(bool bluetoothSelected, bool force)
+{
+    if (!initialized) {
+        return;
+    }
+
+    setTransportDiagnosticPin(bluetoothSelected);
+
+    uint32_t now = getMillis();
+    bool changed = !lastTransportModeValid || lastTransportMode != bluetoothSelected;
+    bool due = force ||
+               changed ||
+               (now - lastTransportModeTimeMs) >= FIGHTPAD12SLIM_ESP32_PROXY_TRANSPORT_MODE_INTERVAL_MS;
+
+    if (!due) {
+        return;
+    }
+
+    uint8_t frame[8] = {
+        kFrameMagic0,
+        kFrameMagicTransport,
+        (uint8_t)(bluetoothSelected ? 0x01 : 0x00),
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+    };
+
+    for (uint8_t i = 0; i < sizeof(frame) - 1; i++) {
+        frame[sizeof(frame) - 1] ^= frame[i];
+    }
+
+    writeUartFrame(frame);
+    lastTransportMode = bluetoothSelected;
+    lastTransportModeValid = true;
+    lastTransportModeTimeMs = now;
+}
+
+bool FightpadESP32ProxyAddon::batteryMonitoringSupported() const
+{
+    return FIGHTPAD12SLIM_ESP32_PROXY_BATTERY_ENABLED &&
+           isValidPin(FIGHTPAD12SLIM_VBAT_SENSE_PIN) &&
+           FIGHTPAD12SLIM_VBAT_ADC_CHANNEL >= 0;
+}
+
+bool FightpadESP32ProxyAddon::readVbusPresent() const
+{
+    if (!isValidPin(FIGHTPAD12SLIM_VBUS_DET_PIN)) {
+        return false;
+    }
+
+    return gpio_get(FIGHTPAD12SLIM_VBUS_DET_PIN) != 0;
+}
+
+uint16_t FightpadESP32ProxyAddon::sampleBatteryAdcRaw() const
+{
+    if (!batteryMonitoringSupported()) {
+        return 0;
+    }
+
+    uint32_t total = 0;
+    adc_select_input(FIGHTPAD12SLIM_VBAT_ADC_CHANNEL);
+    adc_read();
+
+    for (uint16_t sample = 0; sample < kBatterySampleCount; sample++) {
+        total += adc_read();
+    }
+
+    return (uint16_t)((total + (kBatterySampleCount / 2)) / kBatterySampleCount);
+}
+
+uint16_t FightpadESP32ProxyAddon::convertBatteryRawToMillivolts(uint16_t raw) const
+{
+    float adcMillivolts = ((float)raw * kBatteryAdcReferenceMv) / kAdcFullScale;
+    float batteryMillivolts = adcMillivolts * kBatteryDividerScale;
+    if (batteryMillivolts < 0.0f) {
+        return 0;
+    }
+
+    return (uint16_t)(batteryMillivolts + 0.5f);
+}
+
+uint8_t FightpadESP32ProxyAddon::mapBatteryMillivoltsToPercent(uint16_t millivolts) const
+{
+    if (millivolts <= FIGHTPAD12SLIM_ESP32_PROXY_BATTERY_EMPTY_MV) {
+        return 0;
+    }
+    if (millivolts >= FIGHTPAD12SLIM_ESP32_PROXY_BATTERY_FULL_MV) {
+        return 100;
+    }
+
+    struct BatteryPoint {
+        uint16_t millivolts;
+        uint8_t percent;
+    };
+
+    static constexpr BatteryPoint batteryCurve[] = {
+        {3300, 0},
+        {3500, 10},
+        {3650, 25},
+        {3750, 45},
+        {3850, 65},
+        {3950, 80},
+        {4100, 95},
+        {4200, 100},
+    };
+
+    for (size_t i = 1; i < sizeof(batteryCurve) / sizeof(batteryCurve[0]); i++) {
+        if (millivolts <= batteryCurve[i].millivolts) {
+            const BatteryPoint &low = batteryCurve[i - 1];
+            const BatteryPoint &high = batteryCurve[i];
+            uint32_t rangeMv = high.millivolts - low.millivolts;
+            uint32_t deltaMv = millivolts - low.millivolts;
+            uint32_t rangePercent = high.percent - low.percent;
+            return (uint8_t)(low.percent + ((deltaMv * rangePercent) / rangeMv));
+        }
+    }
+
+    return 100;
+}
+
+void FightpadESP32ProxyAddon::sendBatteryStatusFrame(bool force)
+{
+    if (!initialized || !batteryMonitoringSupported()) {
+        return;
+    }
+
+    uint32_t now = getMillis();
+    bool due = force ||
+               !lastBatteryPercentValid ||
+               (now - lastBatteryStatusTimeMs) >= FIGHTPAD12SLIM_ESP32_PROXY_BATTERY_INTERVAL_MS;
+    if (!due) {
+        return;
+    }
+
+    bool vbusPresent = readVbusPresent();
+    uint16_t adcRaw = sampleBatteryAdcRaw();
+    uint16_t batteryMillivolts = convertBatteryRawToMillivolts(adcRaw);
+
+    if (!vbusPresent) {
+        if (!lastBatteryMillivoltsValid || force) {
+            lastBatteryMillivolts = batteryMillivolts;
+            lastBatteryMillivoltsValid = true;
+        } else {
+            uint32_t filtered = ((uint32_t)lastBatteryMillivolts * ((1u << FIGHTPAD12SLIM_ESP32_PROXY_BATTERY_FILTER_SHIFT) - 1u)) + batteryMillivolts;
+            lastBatteryMillivolts = (uint16_t)(filtered >> FIGHTPAD12SLIM_ESP32_PROXY_BATTERY_FILTER_SHIFT);
+        }
+
+        batteryMillivolts = lastBatteryMillivolts;
+    } else {
+        lastBatteryMillivolts = batteryMillivolts;
+        lastBatteryMillivoltsValid = true;
+    }
+
+    uint8_t batteryPercent = vbusPresent ? 100 : mapBatteryMillivoltsToPercent(batteryMillivolts);
+
+    if (!vbusPresent && lastBatteryPercentValid && lastBatteryVbusPresent == vbusPresent) {
+        uint8_t delta = (uint8_t)std::max<int>(
+            batteryPercent > lastBatteryPercent ? batteryPercent - lastBatteryPercent : lastBatteryPercent - batteryPercent,
+            0);
+        if (delta <= FIGHTPAD12SLIM_ESP32_PROXY_BATTERY_PERCENT_HYSTERESIS) {
+            batteryPercent = lastBatteryPercent;
+        }
+    }
+
+    bool changed = !lastBatteryPercentValid ||
+                   lastBatteryPercent != batteryPercent ||
+                   lastBatteryVbusPresent != vbusPresent;
+
+    if (!force && !changed &&
+        (now - lastBatteryStatusTimeMs) < FIGHTPAD12SLIM_ESP32_PROXY_BATTERY_INTERVAL_MS) {
+        return;
+    }
+
+    uint8_t frame[8] = {
+        kFrameMagic0,
+        kFrameMagicBattery,
+        batteryPercent,
+        (uint8_t)(vbusPresent ? 0x01 : 0x00),
+        (uint8_t)(adcRaw & 0xFF),
+        (uint8_t)((adcRaw >> 8) & 0xFF),
+        0x00,
+        0x00,
+    };
+
+    for (uint8_t i = 0; i < sizeof(frame) - 1; i++) {
+        frame[sizeof(frame) - 1] ^= frame[i];
+    }
+
+    writeUartFrame(frame);
+    lastBatteryPercent = batteryPercent;
+    lastBatteryVbusPresent = vbusPresent;
+    lastBatteryPercentValid = true;
+    lastBatteryStatusTimeMs = now;
+}
+
+uint16_t FightpadESP32ProxyAddon::mapInputReportButtons(const GamepadState& state) const
+{
+    uint16_t buttons = 0;
+
+    if (state.buttons & GAMEPAD_MASK_B1) buttons |= 1 << 0;
+    if (state.buttons & GAMEPAD_MASK_B2) buttons |= 1 << 1;
+    if (state.buttons & GAMEPAD_MASK_B3) buttons |= 1 << 2;
+    if (state.buttons & GAMEPAD_MASK_B4) buttons |= 1 << 3;
+    if (state.buttons & GAMEPAD_MASK_L1) buttons |= 1 << 4;
+    if (state.buttons & GAMEPAD_MASK_L2) buttons |= 1 << 5;
+    if (state.buttons & GAMEPAD_MASK_R1) buttons |= 1 << 6;
+    if (state.buttons & GAMEPAD_MASK_R2) buttons |= 1 << 7;
+    if (state.buttons & GAMEPAD_MASK_L3) buttons |= 1 << 8;
+    if (state.buttons & GAMEPAD_MASK_R3) buttons |= 1 << 9;
+    if (state.buttons & GAMEPAD_MASK_S1) buttons |= 1 << 10;
+    if (state.buttons & GAMEPAD_MASK_S2) buttons |= 1 << 11;
+    if (state.buttons & GAMEPAD_MASK_A1) buttons |= 1 << 12;
+    if (state.buttons & GAMEPAD_MASK_A2) buttons |= 1 << 13;
+
+    Gamepad *rawGamepad = Storage::getInstance().GetGamepad();
+    if (rawGamepad != nullptr && (rawGamepad->debouncedGpio & turboPinMask)) {
+        buttons |= 1 << 14;
+    }
+
+    return buttons;
+}
+
+int8_t FightpadESP32ProxyAddon::mapInputReportAxis(uint16_t value) const
+{
+    int32_t scaled = (((int32_t)value * 254) + 32767) / 65535 - 127;
+
+    if (scaled < -127) {
+        scaled = -127;
+    } else if (scaled > 127) {
+        scaled = 127;
+    }
+
+    return (int8_t)scaled;
+}
+
+void FightpadESP32ProxyAddon::sendInputReportFrame()
+{
+    if (!initialized) {
+        return;
+    }
+
+    bool bluetoothSelected = isBluetoothTransportSelected();
+    sendTransportModeFrame(bluetoothSelected);
+
+    if (!bluetoothSelected) {
+        if (inputReportActive) {
+            sendNeutralInputReportFrame();
+            inputReportActive = false;
+            lastInputReportValid = false;
+        }
+        return;
+    }
+
+    Gamepad *gamepad = Storage::getInstance().GetProcessedGamepad();
+    if (gamepad == nullptr) {
+        return;
+    }
+
+    uint16_t buttons = mapInputReportButtons(gamepad->state);
+    uint8_t frame[8] = {
+        kFrameMagic0,
+        kFrameMagicReport,
+        (uint8_t)(buttons & 0xFF),
+        (uint8_t)(buttons >> 8),
+        (uint8_t)(gamepad->state.dpad & GAMEPAD_MASK_DPAD),
+        (uint8_t)mapInputReportAxis(gamepad->state.lx),
+        (uint8_t)mapInputReportAxis(gamepad->state.ly),
+        0x00,
+    };
+
+    for (uint8_t i = 0; i < sizeof(frame) - 1; i++) {
+        frame[sizeof(frame) - 1] ^= frame[i];
+    }
+
+    inputReportActive = true;
+    uint32_t now = getMillis();
+    bool changed = !lastInputReportValid ||
+                   std::memcmp(frame, lastInputReport, sizeof(frame)) != 0;
+    bool due = !lastInputReportValid ||
+               (now - lastInputReportTimeMs) >= FIGHTPAD12SLIM_ESP32_PROXY_INPUT_REPORT_INTERVAL_MS;
+
+    if (!changed && !due) {
+        return;
+    }
+
+    writeUartFrame(frame);
+    std::memcpy(lastInputReport, frame, sizeof(frame));
+    lastInputReportTimeMs = now;
+    lastInputReportValid = true;
+    inputReportActive = true;
+}
+
+void FightpadESP32ProxyAddon::sendNeutralInputReportFrame()
+{
+    uint8_t frame[8] = {
+        kFrameMagic0,
+        kFrameMagicReport,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+    };
+
+    for (uint8_t i = 0; i < sizeof(frame) - 1; i++) {
+        frame[sizeof(frame) - 1] ^= frame[i];
+    }
+
+    writeUartFrame(frame);
+    std::memcpy(lastInputReport, frame, sizeof(frame));
+    lastInputReportTimeMs = getMillis();
+    lastInputReportValid = true;
+}
+
+void FightpadESP32ProxyAddon::writeUartFrame(const uint8_t frame[8])
+{
+    uart_write_blocking(uart, frame, 8);
+}
+
+#if CFG_TUD_CDC
+extern "C" void tud_cdc_line_state_cb(uint8_t itf, bool dtr, bool rts)
+{
+    if (itf == 0 && activeProxy != nullptr) {
+        activeProxy->setUsbLineState(dtr, rts);
+    }
+}
+
+extern "C" void tud_cdc_line_coding_cb(uint8_t itf, cdc_line_coding_t const *lineCoding)
+{
+    if (itf == 0 && activeProxy != nullptr && lineCoding != nullptr) {
+        activeProxy->setUsbLineCoding(lineCoding->bit_rate);
+    }
+}
+#endif

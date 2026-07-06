@@ -1,0 +1,5 @@
+#define GP2040VERSION "v0.7.12-38-ga8f37f5-dirty"
+#define GP2040VERSIONID "0.7.12"
+#define GP2040BUILD "a8f37f5"
+#define GP2040CONFIG "Release"
+#define GP2040PLATFORM "rp2350-arm-s"

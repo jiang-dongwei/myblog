@@ -1,0 +1,120 @@
+# GP2040 Configuration for the Fightpad 12 Slim (RP2350B)
+
+GP2040-CE build target for the **Fightpad 12 Slim** PCB, based on the Raspberry Pi **RP2350B** (QFN-80, 48 GPIOs). The current diagnostic firmware scope is the wired controller path, 19 buttons, OLED button viewer, the GP22 button LED chain, PIO-USB expansion, the GP23 status LED, GP30-GP32 raw ambient-control input dots on the OLED, and a runtime UART feed to the ESP32-C6 BLE HID firmware.
+
+The latest hardware references are `22-FIGHTPAD_schematic.pdf` and `fightpad12slim_rp2350b.xlsx` in the workspace root. They also describe follow-up hardware for ESP32-C6 update flow, a transport switch, and battery/power management; those remain reserved unless noted below.
+
+## Build
+
+From the repo root:
+
+```bash
+PICO_SDK_PATH=/path/to/pico-sdk \
+GP2040_BOARDCONFIG=Fightpad12Slim \
+SKIP_WEBBUILD=TRUE \
+  cmake -B build -DCMAKE_BUILD_TYPE=Release
+
+GP2040_BOARDCONFIG=Fightpad12Slim \
+  cmake --build build --config Release --parallel
+```
+
+Output: `build/GP2040-CE_<version>_Fightpad12Slim.uf2`.
+
+## Flash
+
+Enter RP2350 BOOTSEL mode using the board recovery path/test pad, then copy the `.uf2` to the mounted RP2350 mass-storage volume.
+
+## Boot Hotkeys
+
+| Hold while plugging USB | Effect |
+| --- | --- |
+| `S2` (START) | Enter bootloader / configured GP2040-CE boot behavior |
+| `S1` + `S2` | Enter GP2040-CE Web Configurator mode |
+| `R1` (RB) | Boot into Xbox One input mode (`DEFAULT_INPUT_MODE_R1`) |
+| `B4` (Y / Triangle) | Boot into PS5 input mode (`DEFAULT_INPUT_MODE_B4`, USB auth) |
+
+## Pin Mapping
+
+| GPIO | Function | GP2040-CE assignment | Notes |
+| --- | --- | --- | --- |
+| GP00 | I2C0 SDA - OLED | `ASSIGNED_TO_ADDON` + `I2C0_PIN_SDA = 0` | Display |
+| GP01 | I2C0 SCL - OLED | `ASSIGNED_TO_ADDON` + `I2C0_PIN_SCL = 1` | Display |
+| GP02 | UP | `BUTTON_PRESS_UP` | Button |
+| GP03 | DOWN | `BUTTON_PRESS_DOWN` | Button |
+| GP04 | LEFT | `BUTTON_PRESS_LEFT` | Button |
+| GP05 | RIGHT | `BUTTON_PRESS_RIGHT` | Button |
+| GP06 | A / Cross | `BUTTON_PRESS_B1` | Button |
+| GP07 | B / Circle | `BUTTON_PRESS_B2` | Button |
+| GP08 | X / Square | `BUTTON_PRESS_B3` | Button |
+| GP09 | Y / Triangle | `BUTTON_PRESS_B4` | Button |
+| GP10 | L1 | `BUTTON_PRESS_L1` | Button |
+| GP11 | L2 | `BUTTON_PRESS_L2` | Button |
+| GP12 | R1 | `BUTTON_PRESS_R1` | Button |
+| GP13 | R2 | `BUTTON_PRESS_R2` | Button |
+| GP14 | L3 | `BUTTON_PRESS_L3` | Button |
+| GP15 | R3 | `BUTTON_PRESS_R3` | Button |
+| GP16 | SELECT | `BUTTON_PRESS_S1` | Button |
+| GP17 | START | `BUTTON_PRESS_S2` | Button |
+| GP18 | HOME | `BUTTON_PRESS_A1` | Button |
+| GP19 | BACK / Share | `BUTTON_PRESS_A2` | Button |
+| GP20 | TURBO | `BUTTON_PRESS_TURBO` | Button |
+| GP21 | VBUS-present sense | `ASSIGNED_TO_ADDON` | Read by the ESP32 proxy battery path to detect external USB power |
+| GP22 | Button WS2812 data | `ASSIGNED_TO_ADDON` + `BOARD_LEDS_PIN = 22` | Workbook says 12 LEDs |
+| GP23 | Power / status LED | `BOARD_LED_PIN = 23`, `BOARD_LED_ENABLED = 1` | Confirm on hardware |
+| GP24 | 5V boost enable | `ASSIGNED_TO_ADDON` | Ambient addon drive disabled after blank-OLED test |
+| GP25 | Free / reserved | `ASSIGNED_TO_ADDON` | No schematic consumer confirmed |
+| GP26 | Free / reserved | `ASSIGNED_TO_ADDON` | Stale workbook VBAT notes remain; schematic shows VBAT on GP41 / ADC1 |
+| GP27 | Reserved / free | `ASSIGNED_TO_ADDON` | Current config reserves it |
+| GP28 | USB expansion D+ | `ASSIGNED_TO_ADDON` + `USB_PERIPHERAL_PIN_DPLUS = 28` | PIO-USB host |
+| GP29 | USB expansion D- | `ASSIGNED_TO_ADDON` | Implicit pair to GP28 |
+| GP30 | Ambient LED on/off | `ASSIGNED_TO_ADDON` + diagnostic input | Upper-left OLED dot; active-low |
+| GP31 | Ambient effect previous | `ASSIGNED_TO_ADDON` + diagnostic input | Upper-left OLED dot; active-low |
+| GP32 | Ambient effect next | `ASSIGNED_TO_ADDON` + diagnostic input | Upper-left OLED dot; active-low |
+| GP33 | HID transport switch | `ASSIGNED_TO_ADDON` + `FIGHTPAD12SLIM_TRANSPORT_SEL_PIN = 33` | High = USB-HID, low = BT-HID, independent of power source |
+| GP34 | ESP32-C6 EN / RESET | `ASSIGNED_TO_ADDON` | Reserved; released by runtime firmware so the reset button can pull it low |
+| GP35 | ESP32-C6 boot strap | `ASSIGNED_TO_ADDON` | Reserved; released by runtime firmware so the boot button can pull it low |
+| GP36 | UART1 TX to ESP32-C6 RXD | `ASSIGNED_TO_ADDON` | Follow-up BT HCI |
+| GP37 | UART1 RX from ESP32-C6 TXD | `ASSIGNED_TO_ADDON` | Follow-up BT HCI |
+| GP38 | UART1 CTS from ESP32-C6 RTS | `ASSIGNED_TO_ADDON` | Follow-up BT HCI |
+| GP39 | UART1 RTS to ESP32-C6 CTS | `ASSIGNED_TO_ADDON` | Follow-up BT HCI |
+| GP40 | Ambient WS2812 data | `ASSIGNED_TO_ADDON` | Ambient addon disabled in current safe UF2 |
+| GP41 | Battery voltage sense | `ASSIGNED_TO_ADDON` | Sampled by the ESP32 proxy battery path through the schematic 100k/100k divider |
+| GP42-GP43 | Free / ADC-capable | `ASSIGNED_TO_ADDON` | Locked in v1 until high-GPIO mapping is audited |
+| GP44 | UART0 TX to ESP32-C6 RXD | `ASSIGNED_TO_ADDON` + ESP32 proxy | Runtime BT-HID input frame output |
+| GP45 | UART0 RX from ESP32-C6 TXD | `ASSIGNED_TO_ADDON` + ESP32 proxy | Reserved for ESP logs/replies |
+| GP46-GP47 | Free / ADC-capable | `ASSIGNED_TO_ADDON` | Locked in v1 until high-GPIO mapping is audited |
+
+## OLED Button Viewer
+
+`BoardConfig.h` uses `BUTTON_LAYOUT_BOARD_DEFINED_A/B` and defines `DEFAULT_BOARD_LAYOUT_A/B` so the OLED can draw the Fightpad 12 Slim's physical button circles. The viewer elements are `GP_ELEMENT_PIN_BUTTON` entries bound directly to GPIO pins; this keeps the first hardware test simple because each circle should fill when its physical switch pulls that GPIO low.
+
+## Ambient LED Controls
+
+The Fightpad-specific ambient LED addon was added for the independent GP40 WS2812 chain, but GP40 output is disabled in the current diagnostic UF2 after the first hardware test produced a blank OLED and no ambient LEDs. This diagnostic only initializes GP30-GP32 as pulled-up active-low inputs and shows them as three small upper-left OLED dots. It does not drive GP24 or GP40.
+
+## ESP32-C6 BLE HID Feed
+
+`FightpadESP32ProxyAddon` is enabled for the Fightpad build without adding a USB CDC interface. It initializes RP2350 UART0 on GP44 TX / GP45 RX at 115200 8N1 and talks to the ESP32-C6 firmware in `esp32c6_ble_hid_gamepad_test` with compact 8-byte frames:
+
+- `FP`: buttons low/high, D-pad bitmask, signed X/Y axes, and an XOR checksum. Input frames are sent every 10 ms, or sooner when the input state changes, only while GP33 selects BT-HID.
+- `FT`: runtime BT transport enable state from GP33.
+- `FB`: battery status from RP2350, carrying percent, VBUS-present state, raw ADC sample, and checksum. RP2350 samples GP41 (VBAT divider on ADC1) and GP21 (USB_VBUS-present divider), then the ESP32-C6 updates its BLE HID battery level characteristic.
+
+GP33 is the runtime transport switch. High selects USB-HID and stops the ESP input feed after sending one neutral frame. Low selects BT-HID and keeps the USB HID endpoint enumerated but neutral so a connected USB host cannot retain a stale pressed-button report.
+
+The runtime build does not drive GP34 or GP35. Those nets are left for the physical ESP32-C6 RESET and BOOT buttons.
+
+## Known Limitations
+
+- `Fightpad12Slim.cmake` uses the local `fightpad12slim.h` board header for RP2350B, GP23 status LED, and W25Q128JVSI 16 MiB flash metadata. Confirm with `picotool info` on hardware.
+- GP24 is the 5V boost enable net. The current safe UF2 does not drive it from the ambient path; full USB-vs-battery LED power policy is still open.
+- The workbook Pinout sheet now assigns `VBAT_SENSE_PIN = 41`, labels GP41 as ADC1, and describes VBAT routed to GP41. Stale workbook text still marks GP27 as ADC1 and mentions GP41 BT pairing. The schematic/RP2350B pinout is treated as authoritative: battery sampling is GP41 / ADC1.
+- `LEDS_BUTTON_*` and ambient LED ordering are intentionally not finalized. The workbook says 18 ambient LEDs, while the schematic labels extend through `LED_19`; confirm physical count and chain order on hardware.
+- ESP32-C6 update flow through RP2350 is still follow-up work. BLE battery UI now uses RP2350 GP41 ADC sampling plus GP21 VBUS detection and is forwarded over the runtime UART link.
+
+## References
+
+- PRD: `PRD_Fightpad12Slim.md` in the workspace root.
+- Latest schematic: `22-FIGHTPAD_schematic.pdf`.
+- Latest pin workbook: `fightpad12slim_rp2350b.xlsx`.
+- Reference targets: `configs/Haute42COSMOXMLite/` and `configs/SparkFunProMicroRP2350/`.

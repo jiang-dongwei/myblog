@@ -1,0 +1,14 @@
+{
+  "discussion_id": "2026-07-06-scrollwheel-menu",
+  "created_at": "2026-07-06",
+  "current_phase": 5,
+  "phases": {
+    "split": "completed",
+    "requirements": "completed",
+    "hardware": "completed",
+    "brainstorm": "completed",
+    "milestones": "completed"
+  },
+  "subsystems": ["拨轮输入驱动", "模式管理器", "OLED多层级菜单", "GPIO共享仲裁"],
+  "current_subsystem": 3
+}

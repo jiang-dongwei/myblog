@@ -1,0 +1,86 @@
+﻿cmake : GP2040-CE board config is set: Fightpad12Slim
+At line:1 char:660
++ ... uild) ==='; cmake -B build -G "Ninja" -DCMAKE_BUILD_TYPE=Release 2>&1 ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (GP2040-CE board... Fightpad12Slim 
+   :String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+-- Using board config file: D:/newProject/Fightpad Bringup/GP2040-CE/configs/Fightpad12Slim/Fightpad12Slim.cmake
+-- 
+PICO_SDK_PATH is C:/Users/RRShell/.pico-sdk/sdk/2.2.0
+Target board (PICO_BOARD) is 'sparkfun_promicro_rp2350'.
+Using board configuration from C:/Users/RRShell/.pico-sdk/sdk/2.2.0/src/boards/
+include/boards/sparkfun_promicro_rp2350.h
+Pico Platform (PICO_PLATFORM) is 'rp2350-arm-s'.
+Defaulting compiler (PICO_COMPILER) to 'pico_arm_cortex_m33_gcc' since not spec
+ified.
+Configuring toolchain based on PICO_COMPILER 'pico_arm_cortex_m33_gcc'
+-- Found Git: C:/Program Files/Git/cmd/git.exe (found version "2.54.0.windows.1")
+GIT_REPO_VERSION is v0.7.12-38-ga8f37f5
+CMAKE_GIT_REPO_VERSION is 0.7.12
+GIT_REPO_BUILD_ID is a8f37f5
+Defaulting PICO_GCC_TRIPLE to 'arm-none-eabi'
+-- The C compiler identification is GNU 14.2.1
+-- The CXX compiler identification is GNU 14.2.1
+-- The ASM compiler identification is GNU
+-- Found assembler: C:/Users/RRShell/.pico-sdk/toolchain/14_2_Rel1/bin/arm-none-eabi-gcc.exe
+-- Detecting C compiler ABI info
+-- Detecting C compiler ABI info - done
+-- Check for working C compiler: C:/Users/RRShell/.pico-sdk/toolchain/14_2_Rel1/bin/arm-none-eabi-gcc.exe - skipped
+-- Detecting C compile features
+-- Detecting C compile features - done
+-- Detecting CXX compiler ABI info
+-- Detecting CXX compiler ABI info - done
+-- Check for working CXX compiler: C:/Users/RRShell/.pico-sdk/toolchain/14_2_Rel1/bin/arm-none-eabi-g++.exe - skipped
+-- Detecting CXX compile features
+-- Detecting CXX compile features - done
+-- SKIP_SUBMODULES="TRUE"
+-- Not Skipping WebBuild
+-- Found Node.js version 24.15.0: C:/Program Files/nodejs/node.exe
+-- Found npm version 11.12.1: C:/Program Files/nodejs/npm.cmd
+npm warn deprecated glob@8.1.0: Glob versions prior to v9 are no longer support
+ed
+
+added 535 packages, and audited 536 packages in 3m
+
+112 packages are looking for funding
+  run `npm fund` for details
+
+38 vulnerabilities (4 low, 12 moderate, 20 high, 2 critical)
+
+To address issues that do not require attention, run:
+  npm audit fix
+
+To address all issues (including breaking changes), run:
+  npm audit fix --force
+
+Run `npm audit` for details.
+npm notice
+npm notice New minor version of npm available! 11.12.1 -> 11.13.0
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v11.13.0
+npm notice To update run: npm install -g npm@11.13.0
+npm notice
+
+> gp2040-configurator@0.1.0 build
+> npm run build-proto && npx vite build && npm run makefsdata
+
+
+> gp2040-configurator@0.1.0 build-proto
+> npx pbjs --no-create --no-encode --no-decode --no-convert --no-verify --no-delimited --sparse -t static-module -w commonjs --path ../lib/nanopb/generator/proto/ ../proto/enums.proto | npx pbts --no-comments -m -o ./src_gen/enums.ts -
+
+npm warn exec The following package was not found and will be installed: pbts@4
+.0.7
+npm error canceled
+npm error A complete log of this run can be found in: C:\Users\RRShell\AppData\
+Local\npm-cache\_logs\2026-05-06T06_11_55_199Z-debug-0.log
+npm warn deprecated cross-spawn-async@2.2.5: cross-spawn no longer requires a b
+uild toolchain, use it instead
+npm warn deprecated lodash.template@4.18.1: This package is deprecated. Use htt
+ps://socket.dev/npm/package/eta instead.
+Please enter the input file path
+CMake Error at CMakeLists.txt:137 (message):
+  npm run build failed with 1
+
+
+-- Configuring incomplete, errors occurred!
