@@ -39,6 +39,7 @@ volatile ScrollWheelMenuState g_menuState = { false, 0, 0, 0 };
 volatile bool g_menuStateDirty = false;
 volatile bool g_scrollWheelMenuActive = false;
 volatile bool g_scrollWheelButtonBusy = false;
+volatile bool g_scrollWheelButtonLongPressed = false;
 
 // ── Pin helpers ──────────────────────────────────────────────────────────
 
@@ -158,6 +159,16 @@ void ScrollWheelMenuAddon::navSelect() {
     SWMenuLevel currentLevel = static_cast<SWMenuLevel>(g_menuState.level);
     uint8_t idx = g_menuState.index;
 
+    // COLOR is a terminal list level — short press goes up to RGB_SUB,
+    // never deeper into another INFO page.
+    if (currentLevel == SWMenuLevel::COLOR) {
+        g_menuState.level = static_cast<uint8_t>(SWMenuLevel::RGB_SUB);
+        g_menuState.index = rgbSubIndex;
+        g_menuState.scrollOffset = 0;
+        markMenuDirty();
+        return;
+    }
+
     if (currentLevel == SWMenuLevel::INFO) {
         if (g_menuState.infoSource == 0) {
             g_menuState.level = static_cast<uint8_t>(SWMenuLevel::MAIN);
@@ -267,6 +278,7 @@ void ScrollWheelMenuAddon::updateButton(uint32_t now) {
             btnTimer     = now;
             btnFromLong  = true;
             btnState     = BTN_LONG;
+            g_scrollWheelButtonLongPressed = true;
             navToggle();
         }
         break;
@@ -288,6 +300,7 @@ void ScrollWheelMenuAddon::updateButton(uint32_t now) {
             btnFromLong    = false;
             btnState       = BTN_IDLE;
             g_scrollWheelButtonBusy = false;    // release lock
+            g_scrollWheelButtonLongPressed = false;
         }
         break;
     }
@@ -306,15 +319,19 @@ void ScrollWheelMenuAddon::process() {
     bool bRaw = readPin(SCROLLWHEEL_PIN_B);
 
     if (g_menuState.active) {
-        bool aPressed = aRaw && !prevA;
-        bool bPressed = bRaw && !prevB;
+        // INFO pages display static text; there is no list to scroll.
+        SWMenuLevel level = static_cast<SWMenuLevel>(g_menuState.level);
+        if (level != SWMenuLevel::INFO) {
+            bool aPressed = aRaw && !prevA;
+            bool bPressed = bRaw && !prevB;
 
-        if (aPressed || bPressed) {
-            uint32_t elapsed = now - lastRotaryTime;
-            if (elapsed >= SCROLLWHEEL_ROTARY_DEBOUNCE_MS) {
-                if (aPressed) navUp();
-                if (bPressed) navDown();
-                lastRotaryTime = now;
+            if (aPressed || bPressed) {
+                uint32_t elapsed = now - lastRotaryTime;
+                if (elapsed >= SCROLLWHEEL_ROTARY_DEBOUNCE_MS) {
+                    if (aPressed) navUp();
+                    if (bPressed) navDown();
+                    lastRotaryTime = now;
+                }
             }
         }
     }

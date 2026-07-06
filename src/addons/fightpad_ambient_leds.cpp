@@ -294,14 +294,11 @@ void FightpadAmbientLEDAddon::process() {
 uint8_t FightpadAmbientLEDAddon::readControls() {
     uint8_t controls = 0;
 
-    // When the scrollwheel menu FSM is tracking a GP30 press (even before
-    // the 3s long-press threshold), suppress the DIP ON/OFF control so a
-    // long press never accidentally toggles the ambient LED.
-    extern volatile bool g_scrollWheelButtonBusy;
-    if (!g_scrollWheelButtonBusy) {
-        if (isPressed(FIGHTPAD12SLIM_AMBIENT_ONOFF_PIN)) {
-            controls |= CONTROL_ONOFF;
-        }
+    // GP30 is read unconditionally — the release-edge detection in
+    // handleControlEdges() together with the g_scrollWheelMenuActive
+    // guard in process() is sufficient to prevent long-press LED toggle.
+    if (isPressed(FIGHTPAD12SLIM_AMBIENT_ONOFF_PIN)) {
+        controls |= CONTROL_ONOFF;
     }
 
     if (isPressed(FIGHTPAD12SLIM_AMBIENT_PREV_PIN)) {
@@ -349,7 +346,12 @@ void FightpadAmbientLEDAddon::handleControlEdges(uint8_t controls, uint32_t now)
     // Prefer release edges for ON/OFF (GP30), so a long press that
     // activates the scrollwheel menu never toggles the LED on its
     // rising edge before g_scrollWheelMenuActive becomes true.
-    bool hasOnOff = (released & CONTROL_ONOFF) != 0;
+    // Also suppress ON/OFF when the release follows a long press
+    // (menu enter or exit) — g_scrollWheelButtonLongPressed is set
+    // at the 3 s mark and remains true until the button is released.
+    extern volatile bool g_scrollWheelButtonLongPressed;
+    bool hasOnOff = (released & CONTROL_ONOFF) != 0
+                    && !g_scrollWheelButtonLongPressed;
 
     // PREV/NEXT stay on press edge for responsive effect cycling.
     bool hasPrevNext = (pressed & (CONTROL_PREV | CONTROL_NEXT)) != 0;

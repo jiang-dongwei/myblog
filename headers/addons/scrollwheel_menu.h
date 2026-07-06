@@ -90,6 +90,11 @@ extern volatile bool g_scrollWheelMenuActive;
 // during the long-press window before g_scrollWheelMenuActive becomes true.
 extern volatile bool g_scrollWheelButtonBusy;
 
+// Set true when a GP30 long press (≥3s) is detected; cleared on release.
+// FightpadAmbientLEDAddon checks this to suppress the ON/OFF release edge
+// when the button release follows a long press (menu enter or exit).
+extern volatile bool g_scrollWheelButtonLongPressed;
+
 // ── GPAddon (Core0) ──────────────────────────────────────────────────────
 
 class ScrollWheelMenuAddon : public GPAddon {

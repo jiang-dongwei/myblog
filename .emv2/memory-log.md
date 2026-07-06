@@ -22,3 +22,37 @@
 - GP30长按3s进入菜单，长按3s退出（返回BUTTONS）
 - 叶子节点短按GP30返回上一层（不到BUTTONS）
 - RP2350B/ESP32C6信息页标注"Coming soon"
+
+## 2026-07-07: 修复长按GP30菜单进入时RGB灯误切换
+
+### 根因
+
+`FightpadAmbientLEDAddon::readControls()` 中 `g_scrollWheelButtonBusy` 抑制 GPIO30 读取，
+导致 `controls`(当前) 和 `lastControls`(上次) 不一致，`handleControlEdges()` 检测到假 release 边沿，
+错误触发 `enabled = !enabled`。
+
+### 修复
+
+**第一轮**: 删除 `readControls()` 中对 `g_scrollWheelButtonBusy` 的 3 行抑制代码。
+`handleControlEdges()` 已使用 release-edge 处理 ONOFF，`process()` 已有 `g_scrollWheelMenuActive` 检查，
+两个机制组合已足够防止进入菜单时的长按 LED 误切换。
+
+**第二轮 (exit bug)**: 新增 `g_scrollWheelButtonLongPressed` 全局标志。
+`navToggle()` 在 3s 时将 `g_scrollWheelMenuActive = false`，但按钮仍在按下状态；
+释放时 release edge 在 `handleControlEdges()` 中触发 LED 切换。
+修复: 长按触发时设 `g_scrollWheelButtonLongPressed = true`，释放时清 false；
+`handleControlEdges()` 检查此标志抑制 ONOFF release edge。
+
+## 2026-07-07: 菜单导航行为优化 (S3-A)
+
+### 修复 ①: INFO 页面禁用拨轮滚动
+`process()` 中添加 `level != SWMenuLevel::INFO` 检查，INFO 页面不再响应 GP31/GP32 旋转。
+INFO 是静态信息页，无菜单列表可滚动。
+
+### 修复 ②: COLOR 层级短按返回上层
+`navSelect()` 中对 `SWMenuLevel::COLOR` 做早退处理，直接返回 RGB_SUB。
+COLOR 是终端列表层级，不应再能短按进入 INFO 页面（"删除层次3"）。
+INFO 只能从 MAIN 层进入（RP2350/ESP32 信息页）。
+
+### 讨论ID
+`2026-07-07-menu-nav-fixes`

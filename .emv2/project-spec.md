@@ -26,3 +26,5 @@
 | S1-C | FightpadAmbientLEDAddon GPIO仲裁 | pending | 2026-07-06-scrollwheel-menu |
 | S1-D | 模式管理器 + ScrollWheelMenuAddon | pending | 2026-07-06-scrollwheel-menu |
 | S1-E | 编译验证 + 固件烧录 | pending | 2026-07-06-scrollwheel-menu |
+| S2-A | 修复长按GP30时LED误切换 (删除 g_scrollWheelButtonBusy 抑制) | completed | 2026-07-07-longpress-no-led-toggle |
+| S3-A | INFO页禁用拨轮滚动 + COLOR层级短按返回上层 | completed | 2026-07-07-menu-nav-fixes |
