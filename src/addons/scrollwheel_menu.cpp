@@ -40,6 +40,10 @@ volatile bool g_menuStateDirty = false;
 volatile bool g_scrollWheelMenuActive = false;
 volatile bool g_scrollWheelButtonBusy = false;
 volatile bool g_scrollWheelButtonLongPressed = false;
+volatile uint8_t g_menuRgbTop    = 0xFF;
+volatile uint8_t g_menuRgbBottom = 0xFF;
+volatile uint8_t g_menuRgbButton = 0xFF;
+volatile uint8_t g_menuRgbTarget = 0;
 
 // ── Pin helpers ──────────────────────────────────────────────────────────
 
@@ -159,12 +163,18 @@ void ScrollWheelMenuAddon::navSelect() {
     SWMenuLevel currentLevel = static_cast<SWMenuLevel>(g_menuState.level);
     uint8_t idx = g_menuState.index;
 
-    // COLOR is a terminal list level — short press goes up to RGB_SUB,
-    // never deeper into another INFO page.
+    // COLOR is a terminal list level — short press applies the selected
+    // color to the target and stays on the same list so the user can try
+    // different colors without re-entering.  Exit via long press.
     if (currentLevel == SWMenuLevel::COLOR) {
-        g_menuState.level = static_cast<uint8_t>(SWMenuLevel::RGB_SUB);
-        g_menuState.index = rgbSubIndex;
-        g_menuState.scrollOffset = 0;
+        uint8_t colorIdx = g_menuState.index;  // 0..7 = Red..White
+        switch (g_menuRgbTarget) {
+            case 0: g_menuRgbTop    = colorIdx; break;
+            case 1: g_menuRgbBottom = colorIdx; break;
+            case 2: g_menuRgbButton = colorIdx; break;
+            default: break;
+        }
+        // Stay in COLOR — do not navigate back.
         markMenuDirty();
         return;
     }
@@ -199,8 +209,10 @@ void ScrollWheelMenuAddon::navSelect() {
     } else {
         if (currentLevel == SWMenuLevel::MAIN)
             mainIndex = idx;
-        else if (currentLevel == SWMenuLevel::RGB_SUB)
+        else if (currentLevel == SWMenuLevel::RGB_SUB) {
             rgbSubIndex = idx;
+            g_menuRgbTarget = idx;         // 0=Top, 1=Bottom, 2=Button
+        }
         g_menuState.level = static_cast<uint8_t>(target);
         g_menuState.index = 0;
         g_menuState.scrollOffset = 0;

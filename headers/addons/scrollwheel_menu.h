@@ -95,6 +95,17 @@ extern volatile bool g_scrollWheelButtonBusy;
 // when the button release follows a long press (menu enter or exit).
 extern volatile bool g_scrollWheelButtonLongPressed;
 
+// ── RGB color overrides set from the menu ───────────────────────────────
+// 0xFF = not set (use default DIP cycling / white flash).
+// 0–7 = kMenuColors index (Red..White).
+extern volatile uint8_t g_menuRgbTop;     // GP22 12-LED chain
+extern volatile uint8_t g_menuRgbBottom;  // GP40 19-LED chain
+extern volatile uint8_t g_menuRgbButton;  // button-press flash color
+
+// Target being configured while the COLOR level is shown.
+// 0 = Top Board, 1 = Bottom Board, 2 = Button.  Set on entry from RGB_SUB.
+extern volatile uint8_t g_menuRgbTarget;
+
 // ── GPAddon (Core0) ──────────────────────────────────────────────────────
 
 class ScrollWheelMenuAddon : public GPAddon {

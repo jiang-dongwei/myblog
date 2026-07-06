@@ -54,5 +54,20 @@ INFO 是静态信息页，无菜单列表可滚动。
 COLOR 是终端列表层级，不应再能短按进入 INFO 页面（"删除层次3"）。
 INFO 只能从 MAIN 层进入（RP2350/ESP32 信息页）。
 
+## 2026-07-07: RGB 颜色控制 (S4-A, S4-B)
+
+### 功能
+通过菜单 COLOR 层级选色，覆盖环境灯和按键闪灯颜色。
+
+### 架构
+- `g_menuRgbTop` / `g_menuRgbBottom` / `g_menuRgbButton` — 全局颜色覆盖标志 (0xFF=未设置)
+- `g_menuRgbTarget` — COLOR 层级中正在配置的目标 (0=Top, 1=Bottom, 2=Button)
+- COLOR 短按: 写入 `g_menuRgbTarget` → 对应颜色变量 → 返回 RGB_SUB
+- `render()`: 分别读取 top/bottom 覆盖 → 保持呼吸效果，仅替换色值
+- `updateButtonFlash()`: 读取 button 覆盖 → 替换白色闪灯
+
+### 讨论ID
+`2026-07-07-rgb-color-control`
+
 ### 讨论ID
 `2026-07-07-menu-nav-fixes`

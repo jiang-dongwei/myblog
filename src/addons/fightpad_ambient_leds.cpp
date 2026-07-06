@@ -71,6 +71,23 @@ static void setFlashUntil(uint32_t *flashTimes, int ledIndex, uint32_t until) {
     }
 }
 
+// ── Menu → RGB mapping ──────────────────────────────────────────────────
+// Maps kMenuColors index (0–7: Red..White) to an RGB constant.
+static RGB menuIndexToColor(uint8_t idx) {
+    static const RGB colors[] = {
+        ColorRed,       // 0: Red
+        ColorOrange,    // 1: Orange
+        ColorYellow,    // 2: Yellow
+        ColorGreen,     // 3: Green
+        ColorAqua,      // 4: Cyan
+        ColorBlue,      // 5: Blue
+        ColorPurple,    // 6: Purple
+        ColorWhite,     // 7: White
+    };
+    constexpr uint8_t count = sizeof(colors) / sizeof(colors[0]);
+    return (idx < count) ? colors[idx] : ColorWhite;
+}
+
 bool FightpadAmbientLEDAddon::available() {
     if (FIGHTPAD12SLIM_AMBIENT_CONTROL_DIAGNOSTIC) {
         return true;
@@ -438,6 +455,7 @@ void FightpadAmbientLEDAddon::render(uint32_t now) {
 
 #if FIGHTPAD12SLIM_AMBIENT_FORCE_SOLID_DIAGNOSTIC
     fill(ColorRed, FIGHTPAD12SLIM_AMBIENT_BRIGHTNESS);
+    return;
 #elif FIGHTPAD12SLIM_AMBIENT_PIXEL_SCAN_DIAGNOSTIC
     uint8_t led = effectIndex % FIGHTPAD12SLIM_AMBIENT_LEDS_COUNT;
     frame[led] = ColorWhite.value(
@@ -448,25 +466,58 @@ void FightpadAmbientLEDAddon::render(uint32_t now) {
             static_cast<LEDFormat>(FIGHTPAD12SLIM_AMBIENT_LED_FORMAT),
             FIGHTPAD12SLIM_AMBIENT_BRIGHTNESS);
     }
-#else
+    return;
+#endif
+
 #if FIGHTPAD12SLIM_AMBIENT_RENDER_TOGGLE_DIAGNOSTIC
     renderCounter++;
     if ((renderCounter & 1U) != 0) {
         fill(ColorRed, FIGHTPAD12SLIM_AMBIENT_BRIGHTNESS);
     }
-#else
-    float brightness = getBreathBrightness(now);
-    RGB color = effectColors[effectIndex % EFFECT_COUNT];
-    fill(color, brightness);
+    return;
+#endif
 
-    uint32_t whiteValue = ColorWhite.value(static_cast<LEDFormat>(FIGHTPAD12SLIM_AMBIENT_LED_FORMAT), 1.0f);
+    // ── Normal render path ──────────────────────────────────────────────
+    float brightness = getBreathBrightness(now);
+
+    // Bottom board (GP40, 19 LEDs): menu override or DIP cycling color
+    extern volatile uint8_t g_menuRgbBottom;
+    RGB bottomColor = (g_menuRgbBottom != 0xFF)
+        ? menuIndexToColor(g_menuRgbBottom)
+        : effectColors[effectIndex % EFFECT_COUNT];
+
+    // Top board (GP22, 12 LEDs): menu override or DIP cycling color
+    extern volatile uint8_t g_menuRgbTop;
+    RGB topColor = (g_menuRgbTop != 0xFF)
+        ? menuIndexToColor(g_menuRgbTop)
+        : effectColors[effectIndex % EFFECT_COUNT];
+
+    // Button flash color: menu override or default white
+    extern volatile uint8_t g_menuRgbButton;
+    RGB flashColor = (g_menuRgbButton != 0xFF)
+        ? menuIndexToColor(g_menuRgbButton)
+        : ColorWhite;
+
+    uint32_t flashValue = flashColor.value(
+        static_cast<LEDFormat>(FIGHTPAD12SLIM_AMBIENT_LED_FORMAT), 1.0f);
+
+    // Fill bottom frame (GP40)
+    uint32_t bottomValue = bottomColor.value(
+        static_cast<LEDFormat>(FIGHTPAD12SLIM_AMBIENT_LED_FORMAT), brightness);
+    for (int led = 0; led < FIGHTPAD12SLIM_AMBIENT_LEDS_COUNT; led++) {
+        frame[led] = bottomValue;
+    }
+
+    // Fill top frame (GP22): breathing color base, flash on top
+    uint32_t topValue = topColor.value(
+        static_cast<LEDFormat>(FIGHTPAD12SLIM_AMBIENT_LED_FORMAT), brightness);
     for (int led = 0; led < FIGHTPAD12SLIM_AMBIENT_GP22_LEDS_COUNT; led++) {
         if (now < gp22FlashUntil[led]) {
-            frame_gp22[led] = whiteValue;
+            frame_gp22[led] = flashValue;
+        } else {
+            frame_gp22[led] = topValue;
         }
     }
-#endif
-#endif
 }
 
 void FightpadAmbientLEDAddon::show() {
