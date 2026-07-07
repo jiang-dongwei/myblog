@@ -104,10 +104,17 @@ metadata:
 | S4-B | render() 使用菜单颜色覆盖 + 按钮闪灯颜色 | ✅ |
 | S5-A | RGB OFF 功能 | ✅ |
 | S6-A | GP19 BACK 按钮返回 | ✅ |
+| S7-A | g_menuRgb* 对齐 AnimationStation colors 索引 (0-15) | ✅ |
+| S7-B | FightpadAmbientLEDOptions protobuf message + Flash 持久化 | ✅ |
+| S7-C | 移除 DIP GPIO31/32 直接切换颜色 | ✅ |
+
+## 已取消的功能
+
+- **DIP 直接切换颜色 (GPIO31/32)**: 已从 `FightpadAmbientLEDAddon::process()` 移除。颜色现在仅通过拨轮菜单设置。GPIO30-32 专属于 ScrollWheelMenuAddon。
 
 ## 待讨论/未实施
 
-1. **RGB 颜色持久化 (写 Flash)**:
+1. ~~**RGB 颜色持久化 (写 Flash)**~~: ✅ 已完成，方案 A — `config.proto` 新增 `FightpadAmbientLEDOptions`
    - 方案 A: 改 `proto/config.proto` 新增 `FightpadAmbientLEDOptions`，走 protobuf → `ConfigUtils::save()`
    - 方案 B: 直接 `EEPROM.writeCache[0x7FF0]=magic;` 偷 4 字节，调 `EEPROM.commit()`
    - 用户尚未决定

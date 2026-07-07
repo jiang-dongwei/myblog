@@ -219,61 +219,43 @@ void FightpadAmbientLEDAddon::setup() {
 
 void FightpadAmbientLEDAddon::process() {
     uint32_t now = getMillis();
-    uint8_t controls = readControls();
     updateButtonFlash(now);
-    fightpadAmbientDiagControls = controls;
     fightpadAmbientDiagEnabled = enabled ? 1 : 0;
     fightpadAmbientDiagEffect = effectIndex;
     fightpadAmbientDiagTicks++;
 
     if (!FIGHTPAD12SLIM_AMBIENT_ENABLED) {
-        lastControls = controls;
-        return;
-    }
-
-    // When scrollwheel menu is active, skip DIP control logic
-    // but continue LED rendering below. This lets the menu take
-    // over GPIO30-32 while keeping ambient lighting visible.
-    extern volatile bool g_scrollWheelMenuActive;
-    if (g_scrollWheelMenuActive) {
-        lastControls = controls;
-        // Still run LED rendering
-        if ((now - lastFrameTime) >= UPDATE_INTERVAL_MS) {
-            render(now);
-            show();
-            lastFrameTime = now;
-        }
         return;
     }
 
 #if FIGHTPAD12SLIM_AMBIENT_CONTROL_DIAGNOSTIC
-    uint8_t rawControls = readRawControlBits();
-    uint8_t activeHighControls = rawControls;
-    uint8_t activeLowControls = (~rawControls) & 0x07;
+    {
+        uint8_t rawControls = readRawControlBits();
+        uint8_t activeHighControls = rawControls;
+        uint8_t activeLowControls = (~rawControls) & 0x07;
 
-    fightpadAmbientDiagControls = activeLowControls;
-    clearFrame();
+        fightpadAmbientDiagControls = activeLowControls;
+        clearFrame();
 
-    uint32_t lowerValue = makeControlDiagnosticColor(activeHighControls).value(
-        static_cast<LEDFormat>(FIGHTPAD12SLIM_AMBIENT_LED_FORMAT),
-        FIGHTPAD12SLIM_AMBIENT_BRIGHTNESS);
+        uint32_t lowerValue = makeControlDiagnosticColor(activeHighControls).value(
+            static_cast<LEDFormat>(FIGHTPAD12SLIM_AMBIENT_LED_FORMAT),
+            FIGHTPAD12SLIM_AMBIENT_BRIGHTNESS);
 
-    for (int led = 0; led < FIGHTPAD12SLIM_AMBIENT_LEDS_COUNT; led++) {
-        frame[led] = lowerValue;
+        for (int led = 0; led < FIGHTPAD12SLIM_AMBIENT_LEDS_COUNT; led++) {
+            frame[led] = lowerValue;
+        }
+
+        for (int led = 0; led < FIGHTPAD12SLIM_AMBIENT_GP22_LEDS_COUNT; led++) {
+            frame_gp22[led] = lowerValue;
+        }
+
+        show();
+        lastFrameTime = now;
+        return;
     }
-
-    for (int led = 0; led < FIGHTPAD12SLIM_AMBIENT_GP22_LEDS_COUNT; led++) {
-        frame_gp22[led] = lowerValue;
-    }
-
-    show();
-    lastControls = activeLowControls;
-    lastFrameTime = now;
-    return;
 #endif
 
 #if FIGHTPAD12SLIM_AMBIENT_POWER_ONLY_DIAGNOSTIC
-    lastControls = controls;
     return;
 #endif
 
@@ -285,14 +267,13 @@ void FightpadAmbientLEDAddon::process() {
             fightpadAmbientDiagShows++;
             lastFrameTime = now;
         }
-        lastControls = controls;
         return;
     }
 #endif
 
-    handleControlEdges(controls, now);
-    lastControls = controls;
-
+    // LED rendering: driven exclusively by g_menuRgb* variables
+    // (set via scrollwheel menu, persisted to flash).  No DIP-switch
+    // color cycling — GPIO30-32 belong to the scrollwheel encoder now.
     if ((now - lastFrameTime) < UPDATE_INTERVAL_MS) {
         return;
     }
