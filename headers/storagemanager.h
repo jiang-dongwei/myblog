@@ -41,6 +41,7 @@ public:
 	DisplayOptions& getDisplayOptions() { return config.displayOptions; }
 	LEDOptions& getLedOptions() { return config.ledOptions; }
 	AddonOptions& getAddonOptions() { return config.addonOptions; }
+	FightpadAmbientLEDOptions& getFightpadAmbientLEDOptions() { return config.addonOptions.fightpadAmbientLEDOptions; }
 	AnimationOptions& getAnimationOptions() { return config.animationOptions; }
 	ProfileOptions& getProfileOptions() { return config.profileOptions; }
 	GpioMappingInfo* getProfilePinMappings() { return functionalPinMappings; }

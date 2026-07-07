@@ -74,7 +74,7 @@ metadata:
 | `g_scrollWheelMenuActive` | scrollwheel_menu.cpp | 菜单激活 → OLED 接管 + DIP 暂停 |
 | `g_scrollWheelButtonBusy` | scrollwheel_menu.cpp | GP30 按下即设 true |
 | `g_scrollWheelButtonLongPressed` | scrollwheel_menu.cpp | 长按已触发 → 抑制释放边沿 LED 切换 |
-| `g_menuRgbTop` (0xFF=未设, 0=OFF, 1-8=颜色) | scrollwheel_menu.cpp | 顶板按键灯颜色覆盖 |
+| `g_menuRgbTop` (0xFF=未设, 0-15=AS颜色索引) | scrollwheel_menu.cpp | 顶板按键灯颜色覆盖 |
 | `g_menuRgbBottom` (同上) | scrollwheel_menu.cpp | 底板环境灯颜色覆盖 |
 | `g_menuRgbButton` (同上) | scrollwheel_menu.cpp | 按键闪灯颜色覆盖 |
 | `g_menuRgbTarget` (0/1/2) | scrollwheel_menu.cpp | COLOR 层级当前配置目标 |

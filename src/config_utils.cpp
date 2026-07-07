@@ -810,6 +810,13 @@ void ConfigUtils::initUnsetPropertiesWithDefaults(Config& config)
     INIT_UNSET_PROPERTY(config.addonOptions.fightpadESP32ProxyOptions, useFlowControl, !!FIGHTPAD12SLIM_ESP32_PROXY_USE_FLOW_CONTROL);
     INIT_UNSET_PROPERTY(config.addonOptions.fightpadESP32ProxyOptions, autoDtrRts, !!FIGHTPAD12SLIM_ESP32_PROXY_AUTO_DTR_RTS);
 
+    // addonOptions.fightpadAmbientLEDOptions
+    // 0xFF = "never set by menu" → use default DIP-switch cycling / white flash.
+    // Valid values are 0..15 (AnimationStation colors vector indices).
+    INIT_UNSET_PROPERTY(config.addonOptions.fightpadAmbientLEDOptions, topBoardColorIndex, 0xFF);
+    INIT_UNSET_PROPERTY(config.addonOptions.fightpadAmbientLEDOptions, bottomBoardColorIndex, 0xFF);
+    INIT_UNSET_PROPERTY(config.addonOptions.fightpadAmbientLEDOptions, buttonFlashColorIndex, 0xFF);
+
     // addonOptions.pcf8575Options
     INIT_UNSET_PROPERTY(config.addonOptions.pcf8575Options, enabled, I2C_PCF8575_ENABLED);
     INIT_UNSET_PROPERTY(config.addonOptions.pcf8575Options, deprecatedI2cBlock, (I2C_PCF8575_BLOCK == i2c0) ? 0 : 1);

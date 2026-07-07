@@ -72,23 +72,14 @@ static void setFlashUntil(uint32_t *flashTimes, int ledIndex, uint32_t until) {
 }
 
 // ── Menu → RGB mapping ──────────────────────────────────────────────────
-// Maps kMenuColors index to an RGB constant.
-// 0 = OFF (black), 1 = Red .. 8 = White.
+// g_menuRgbTop/Bottom/Button store AnimationStation `colors` vector indices
+// (0=Black..15=Violet).  Direct lookup — index space is shared with proto
+// AnimationOptions.staticColorIndex / buttonColorIndex.
 static RGB menuIndexToColor(uint8_t idx) {
-    if (idx == 0) return RGB(0, 0, 0);  // OFF
-    static const RGB colors[] = {
-        ColorRed,       // 1: Red
-        ColorOrange,    // 2: Orange
-        ColorYellow,    // 3: Yellow
-        ColorGreen,     // 4: Green
-        ColorAqua,      // 5: Cyan
-        ColorBlue,      // 6: Blue
-        ColorPurple,    // 7: Purple
-        ColorWhite,     // 8: White
-    };
-    constexpr uint8_t count = sizeof(colors) / sizeof(colors[0]);
-    uint8_t shifted = idx - 1;
-    return (shifted < count) ? colors[shifted] : ColorWhite;
+    // Index 0xFF = not set (caller checks before calling this).
+    if (idx < ::colors.size())
+        return ::colors[idx];
+    return ColorBlack;  // fallback
 }
 
 bool FightpadAmbientLEDAddon::available() {

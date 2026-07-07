@@ -909,6 +909,17 @@ message FightpadESP32ProxyOptions
     optional bool autoDtrRts = 11;
 }
 
+// Fightpad12Slim ambient LED color persistence.
+// Stores AnimationStation `colors` vector indices (0=Black..15=Violet) for the
+// three LED chains managed by FightpadAmbientLEDAddon.  0xFF = menu has never
+// set a color → use default DIP-switch cycling / white flash.
+message FightpadAmbientLEDOptions
+{
+    optional uint32 topBoardColorIndex = 1;     // GP22 12-LED chain (button lights)
+    optional uint32 bottomBoardColorIndex = 2;  // GP40 19-LED chain (ambient base)
+    optional uint32 buttonFlashColorIndex = 3;  // button-press flash color
+}
+
 message AddonOptions
 {
     optional BootselButtonOptions bootselButtonOptions = 1;
@@ -942,6 +953,7 @@ message AddonOptions
     optional TG16Options tg16Options = 29;
     optional HETriggerOptions heTriggerOptions = 30;
     optional FightpadESP32ProxyOptions fightpadESP32ProxyOptions = 31;
+    optional FightpadAmbientLEDOptions fightpadAmbientLEDOptions = 32;
 }
 
 message MigrationHistory

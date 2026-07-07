@@ -57,7 +57,9 @@ enum class SWMenuLevel : uint8_t {
 struct SWMenuItem {
     const char* label;
     SWMenuLevel targetLevel;   // Level to enter on selection, or INFO for leaf
-    uint8_t     targetIndex;   // Pre-set index when entering that level (unused for INFO)
+    // For COLOR items (targetLevel==INFO): AnimationStation `colors` vector index (0..15).
+    // For non-COLOR items: pre-set index when entering that level (unused for INFO).
+    uint8_t     targetIndex;
 };
 
 // Forward-declare the menu table arrays
@@ -100,9 +102,12 @@ extern volatile bool g_scrollWheelButtonBusy;
 extern volatile bool g_scrollWheelButtonLongPressed;
 
 // ── RGB color overrides set from the menu ───────────────────────────────
-// 0xFF = not set (use default DIP cycling / white flash).
-// 0    = OFF (black).
-// 1–8  = kMenuColors index (Red..White).
+// Each stores an AnimationStation `colors` vector index (0..15), or 0xFF
+// for "not set" (use default DIP cycling / white flash).
+//  0 = ColorBlack (OFF), 1 = ColorWhite, 2 = ColorRed, 3 = ColorOrange,
+//  4 = ColorYellow, 5 = ColorLimeGreen, 6 = ColorGreen, 7 = ColorSeafoam,
+//  8 = ColorAqua, 9 = ColorSkyBlue, 10 = ColorBlue, 11 = ColorPurple,
+//  12 = ColorPink, 13 = ColorMagenta, 14 = ColorIndigo, 15 = ColorViolet.
 extern volatile uint8_t g_menuRgbTop;     // GP22 12-LED chain
 extern volatile uint8_t g_menuRgbBottom;  // GP40 19-LED chain
 extern volatile uint8_t g_menuRgbButton;  // button-press flash color

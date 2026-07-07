@@ -1,6 +1,9 @@
 #include "addons/scrollwheel_menu.h"
 #include "gamepad.h"
 #include "helper.h"
+#include "storagemanager.h"
+#include "eventmanager.h"
+#include "GPStorageSaveEvent.h"
 
 #include <cstdio>
 #include <cstring>
@@ -22,16 +25,21 @@ const SWMenuItem kMenuRgbSub[] = {
 };
 const uint8_t kMenuRgbSubCount = sizeof(kMenuRgbSub) / sizeof(kMenuRgbSub[0]);
 
+// COLOR items use `targetIndex` to carry the AnimationStation `colors`
+// vector index so that g_menuRgbTop/Bottom/Button values match proto
+// AnimationOptions.staticColorIndex / buttonColorIndex encoding.
+//   0=Black(OFF), 1=White, 2=Red, 3=Orange, 4=Yellow, 5=LimeGreen,
+//   6=Green, 7=Seafoam, 8=Aqua(Cyan), 9=SkyBlue, 10=Blue, 11=Purple.
 const SWMenuItem kMenuColors[] = {
-    { "OFF",    SWMenuLevel::INFO, 0 },
-    { "Red",    SWMenuLevel::INFO, 0 },
-    { "Orange", SWMenuLevel::INFO, 0 },
-    { "Yellow", SWMenuLevel::INFO, 0 },
-    { "Green",  SWMenuLevel::INFO, 0 },
-    { "Cyan",   SWMenuLevel::INFO, 0 },
-    { "Blue",   SWMenuLevel::INFO, 0 },
-    { "Purple", SWMenuLevel::INFO, 0 },
-    { "White",  SWMenuLevel::INFO, 0 },
+    { "OFF",    SWMenuLevel::INFO, 0  },  // ColorBlack
+    { "Red",    SWMenuLevel::INFO, 2  },  // ColorRed
+    { "Orange", SWMenuLevel::INFO, 3  },  // ColorOrange
+    { "Yellow", SWMenuLevel::INFO, 4  },  // ColorYellow
+    { "Green",  SWMenuLevel::INFO, 6  },  // ColorGreen
+    { "Cyan",   SWMenuLevel::INFO, 8  },  // ColorAqua
+    { "Blue",   SWMenuLevel::INFO, 10 },  // ColorBlue
+    { "Purple", SWMenuLevel::INFO, 11 },  // ColorPurple
+    { "White",  SWMenuLevel::INFO, 1  },  // ColorWhite
 };
 const uint8_t kMenuColorsCount = sizeof(kMenuColors) / sizeof(kMenuColors[0]);
 
@@ -96,6 +104,15 @@ void ScrollWheelMenuAddon::setup() {
     g_menuStateDirty = false;
     g_scrollWheelMenuActive = false;
 
+    // Restore menu color overrides from flash (0xFF = never set).
+    FightpadAmbientLEDOptions& opts = Storage::getInstance().getFightpadAmbientLEDOptions();
+    if (opts.topBoardColorIndex != 0xFF)
+        g_menuRgbTop = static_cast<uint8_t>(opts.topBoardColorIndex);
+    if (opts.bottomBoardColorIndex != 0xFF)
+        g_menuRgbBottom = static_cast<uint8_t>(opts.bottomBoardColorIndex);
+    if (opts.buttonFlashColorIndex != 0xFF)
+        g_menuRgbButton = static_cast<uint8_t>(opts.buttonFlashColorIndex);
+
     printf("[ScrollWheel] Setup OK. Pins: SW=%d A=%d B=%d\n",
            SCROLLWHEEL_PIN_SW, SCROLLWHEEL_PIN_A, SCROLLWHEEL_PIN_B);
 }
@@ -122,6 +139,17 @@ uint8_t ScrollWheelMenuAddon::currentItemCount() const {
 
 static void markMenuDirty() {
     g_menuStateDirty = true;
+}
+
+// Write the three color-override variables to config and trigger a
+// flash commit.  Follows the same pattern as StaticColor::SaveIndexOptions()
+// + AnimationStation::HandleEvent().
+static void persistColors() {
+    FightpadAmbientLEDOptions& opts = Storage::getInstance().getFightpadAmbientLEDOptions();
+    opts.topBoardColorIndex    = g_menuRgbTop;
+    opts.bottomBoardColorIndex = g_menuRgbBottom;
+    opts.buttonFlashColorIndex = g_menuRgbButton;
+    EventManager::getInstance().triggerEvent(new GPStorageSaveEvent(false));
 }
 
 static void clampScrollOffset() {
@@ -168,19 +196,23 @@ void ScrollWheelMenuAddon::navSelect() {
     uint8_t idx = g_menuState.index;
 
     // RGB_SUB "RGB OFF" (index 3): immediate action — turn off all LEDs.
+    // AnimationStation index 0 = ColorBlack (OFF).
     if (currentLevel == SWMenuLevel::RGB_SUB && idx == 3) {
         g_menuRgbTop    = 0;
         g_menuRgbBottom = 0;
         g_menuRgbButton = 0;
+        persistColors();
         markMenuDirty();
         return;
     }
 
     // COLOR is a terminal list level — short press applies the selected
-    // color to the target and stays on the same list so the user can try
-    // different colors without re-entering.  Exit via long press.
+    // color's AnimationStation index (stored in targetIndex) to the target
+    // and stays on the same list so the user can try different colors
+    // without re-entering.  Exit via long press or BACK.
     if (currentLevel == SWMenuLevel::COLOR) {
-        uint8_t colorIdx = g_menuState.index;  // 0=OFF, 1=Red..8=White
+        const SWMenuItem* table = currentMenuTable();
+        uint8_t colorIdx = table[idx].targetIndex;  // AnimationStation colors index
         switch (g_menuRgbTarget) {
             case 0: g_menuRgbTop    = colorIdx; break;
             case 1: g_menuRgbBottom = colorIdx; break;
@@ -188,6 +220,7 @@ void ScrollWheelMenuAddon::navSelect() {
             default: break;
         }
         // Stay in COLOR — do not navigate back.
+        persistColors();
         markMenuDirty();
         return;
     }
