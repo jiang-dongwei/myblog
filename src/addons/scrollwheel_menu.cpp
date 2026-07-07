@@ -18,10 +18,12 @@ const SWMenuItem kMenuRgbSub[] = {
     { "Top Board RGB",    SWMenuLevel::COLOR, 0 },
     { "Bottom Board RGB", SWMenuLevel::COLOR, 0 },
     { "Button RGB",       SWMenuLevel::COLOR, 0 },
+    { "RGB OFF",          SWMenuLevel::INFO, 0 },  // immediate action, no sub-level
 };
 const uint8_t kMenuRgbSubCount = sizeof(kMenuRgbSub) / sizeof(kMenuRgbSub[0]);
 
 const SWMenuItem kMenuColors[] = {
+    { "OFF",    SWMenuLevel::INFO, 0 },
     { "Red",    SWMenuLevel::INFO, 0 },
     { "Orange", SWMenuLevel::INFO, 0 },
     { "Yellow", SWMenuLevel::INFO, 0 },
@@ -77,9 +79,11 @@ void ScrollWheelMenuAddon::setup() {
     initPin(SCROLLWHEEL_PIN_SW);
     initPin(SCROLLWHEEL_PIN_A);
     initPin(SCROLLWHEEL_PIN_B);
+    initPin(SCROLLWHEEL_PIN_BACK);
 
     prevA = readPin(SCROLLWHEEL_PIN_A);
     prevB = readPin(SCROLLWHEEL_PIN_B);
+    prevBack = readPin(SCROLLWHEEL_PIN_BACK);
     btnState       = BTN_IDLE;
     btnTimer        = 0;
     debouncedButton = false;
@@ -163,11 +167,20 @@ void ScrollWheelMenuAddon::navSelect() {
     SWMenuLevel currentLevel = static_cast<SWMenuLevel>(g_menuState.level);
     uint8_t idx = g_menuState.index;
 
+    // RGB_SUB "RGB OFF" (index 3): immediate action — turn off all LEDs.
+    if (currentLevel == SWMenuLevel::RGB_SUB && idx == 3) {
+        g_menuRgbTop    = 0;
+        g_menuRgbBottom = 0;
+        g_menuRgbButton = 0;
+        markMenuDirty();
+        return;
+    }
+
     // COLOR is a terminal list level — short press applies the selected
     // color to the target and stays on the same list so the user can try
     // different colors without re-entering.  Exit via long press.
     if (currentLevel == SWMenuLevel::COLOR) {
-        uint8_t colorIdx = g_menuState.index;  // 0..7 = Red..White
+        uint8_t colorIdx = g_menuState.index;  // 0=OFF, 1=Red..8=White
         switch (g_menuRgbTarget) {
             case 0: g_menuRgbTop    = colorIdx; break;
             case 1: g_menuRgbBottom = colorIdx; break;
@@ -234,6 +247,46 @@ void ScrollWheelMenuAddon::navToggle() {
         g_scrollWheelMenuActive = false;
         markMenuDirty();
         printf("[ScrollWheel] Menu EXIT\n");
+    }
+}
+
+void ScrollWheelMenuAddon::navBack() {
+    if (!g_menuState.active) return;
+
+    SWMenuLevel currentLevel = static_cast<SWMenuLevel>(g_menuState.level);
+
+    switch (currentLevel) {
+    case SWMenuLevel::MAIN:
+        // Back from MAIN = exit menu
+        g_menuState.active = false;
+        g_scrollWheelMenuActive = false;
+        markMenuDirty();
+        break;
+    case SWMenuLevel::RGB_SUB:
+        // Back to MAIN, restore selection
+        g_menuState.level = static_cast<uint8_t>(SWMenuLevel::MAIN);
+        g_menuState.index = mainIndex;
+        g_menuState.scrollOffset = 0;
+        markMenuDirty();
+        break;
+    case SWMenuLevel::COLOR:
+        // Back to RGB_SUB without applying color
+        g_menuState.level = static_cast<uint8_t>(SWMenuLevel::RGB_SUB);
+        g_menuState.index = rgbSubIndex;
+        g_menuState.scrollOffset = 0;
+        markMenuDirty();
+        break;
+    case SWMenuLevel::INFO:
+        if (g_menuState.infoSource == 0) {
+            g_menuState.level = static_cast<uint8_t>(SWMenuLevel::MAIN);
+            g_menuState.index = mainIndex;
+        } else {
+            g_menuState.level = static_cast<uint8_t>(SWMenuLevel::RGB_SUB);
+            g_menuState.index = rgbSubIndex;
+        }
+        g_menuState.scrollOffset = 0;
+        markMenuDirty();
+        break;
     }
 }
 
@@ -346,6 +399,20 @@ void ScrollWheelMenuAddon::process() {
                 }
             }
         }
+    }
+
+    // GP19 BACK: press edge → navBack()
+    if (g_menuState.active) {
+        bool backRaw = readPin(SCROLLWHEEL_PIN_BACK);
+        bool backPressed = backRaw && !prevBack;
+        if (backPressed) {
+            uint32_t elapsed = now - lastBackTime;
+            if (elapsed >= SCROLLWHEEL_ROTARY_DEBOUNCE_MS) {
+                navBack();
+                lastBackTime = now;
+            }
+        }
+        prevBack = backRaw;
     }
 
     prevA = aRaw;

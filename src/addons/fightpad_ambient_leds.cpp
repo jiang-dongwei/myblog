@@ -72,20 +72,23 @@ static void setFlashUntil(uint32_t *flashTimes, int ledIndex, uint32_t until) {
 }
 
 // ── Menu → RGB mapping ──────────────────────────────────────────────────
-// Maps kMenuColors index (0–7: Red..White) to an RGB constant.
+// Maps kMenuColors index to an RGB constant.
+// 0 = OFF (black), 1 = Red .. 8 = White.
 static RGB menuIndexToColor(uint8_t idx) {
+    if (idx == 0) return RGB(0, 0, 0);  // OFF
     static const RGB colors[] = {
-        ColorRed,       // 0: Red
-        ColorOrange,    // 1: Orange
-        ColorYellow,    // 2: Yellow
-        ColorGreen,     // 3: Green
-        ColorAqua,      // 4: Cyan
-        ColorBlue,      // 5: Blue
-        ColorPurple,    // 6: Purple
-        ColorWhite,     // 7: White
+        ColorRed,       // 1: Red
+        ColorOrange,    // 2: Orange
+        ColorYellow,    // 3: Yellow
+        ColorGreen,     // 4: Green
+        ColorAqua,      // 5: Cyan
+        ColorBlue,      // 6: Blue
+        ColorPurple,    // 7: Purple
+        ColorWhite,     // 8: White
     };
     constexpr uint8_t count = sizeof(colors) / sizeof(colors[0]);
-    return (idx < count) ? colors[idx] : ColorWhite;
+    uint8_t shifted = idx - 1;
+    return (shifted < count) ? colors[shifted] : ColorWhite;
 }
 
 bool FightpadAmbientLEDAddon::available() {

@@ -22,6 +22,10 @@
 #define SCROLLWHEEL_PIN_B 32
 #endif
 
+#ifndef SCROLLWHEEL_PIN_BACK
+#define SCROLLWHEEL_PIN_BACK 19
+#endif
+
 #ifndef SCROLLWHEEL_ACTIVE_LOW
 #define SCROLLWHEEL_ACTIVE_LOW 1
 #endif
@@ -97,7 +101,8 @@ extern volatile bool g_scrollWheelButtonLongPressed;
 
 // ── RGB color overrides set from the menu ───────────────────────────────
 // 0xFF = not set (use default DIP cycling / white flash).
-// 0–7 = kMenuColors index (Red..White).
+// 0    = OFF (black).
+// 1–8  = kMenuColors index (Red..White).
 extern volatile uint8_t g_menuRgbTop;     // GP22 12-LED chain
 extern volatile uint8_t g_menuRgbBottom;  // GP40 19-LED chain
 extern volatile uint8_t g_menuRgbButton;  // button-press flash color
@@ -131,6 +136,7 @@ private:
     void navDown();     // GP32 edge → move cursor down
     void navSelect();   // GP30 short press → enter/back
     void navToggle();   // GP30 long press → enter/exit menu
+    void navBack();     // GP19 short press → back one level / exit
 
     // Helpers
     uint8_t         currentItemCount() const;
@@ -153,6 +159,10 @@ private:
     bool prevA = false;
     bool prevB = false;
     uint32_t lastRotaryTime = 0;
+
+    // GP19 BACK button
+    bool prevBack = false;
+    uint32_t lastBackTime = 0;
 
     // Stored parent indices for BACK navigation
     uint8_t mainIndex = 0;       // which item was selected in level 0

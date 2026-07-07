@@ -30,3 +30,4 @@
 | S3-A | INFO页禁用拨轮滚动 + COLOR层级短按返回上层 | completed | 2026-07-07-menu-nav-fixes |
 | S4-A | 全局颜色状态变量 + COLOR层级短按写入颜色 | completed | 2026-07-07-rgb-color-control |
 | S4-B | render()使用菜单颜色覆盖 + 按钮闪灯颜色 | completed | 2026-07-07-rgb-color-control |
+| S5-A | RGB_SUB增加"RGB OFF" + COLOR增加"OFF"色 | completed | 2026-07-07-rgb-off |
