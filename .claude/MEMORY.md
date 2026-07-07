@@ -1,0 +1,1 @@
+- [GP2040-CE 项目上下文](memory/gp2040-ce-project-context.md) — 项目架构、硬件引脚、开发步骤、待讨论事项
