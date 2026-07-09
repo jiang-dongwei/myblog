@@ -294,7 +294,13 @@ void DisplayAddon::drawScrollWheelMenu() {
         case SWMenuLevel::RGB_SUB:
             table = kMenuRgbSub; count = kMenuRgbSubCount; break;
         case SWMenuLevel::COLOR:
+        case SWMenuLevel::COLOR_BTN:
+        case SWMenuLevel::COLOR_AMB:
             table = kMenuColors; count = kMenuColorsCount; break;
+        case SWMenuLevel::BUTTON_EFFECT:
+            table = kMenuButtonEffects; count = kMenuButtonEffectsCount; break;
+        case SWMenuLevel::AMBIENT_EFFECT:
+            table = kMenuAmbientEffects; count = kMenuAmbientEffectsCount; break;
         default: break;
     }
     if (table == nullptr || count == 0) {
@@ -310,18 +316,36 @@ void DisplayAddon::drawScrollWheelMenu() {
     if (off + SW_MAX_ROWS > count && count > SW_MAX_ROWS)
         off = count - SW_MAX_ROWS;
 
+    // Determine the currently-active value for this level so we can
+    // mark it with "*" in the rightmost column.
+    // 0xFF = nothing active / never set.
+    uint8_t activeVal = 0xFF;
+    switch (level) {
+        case SWMenuLevel::COLOR:       activeVal = g_menuRgbButton;    break;
+        case SWMenuLevel::COLOR_BTN:   activeVal = g_menuRgbTop;       break;
+        case SWMenuLevel::COLOR_AMB:   activeVal = g_menuRgbBottom;    break;
+        case SWMenuLevel::BUTTON_EFFECT:  activeVal = g_menuButtonEffect;  break;
+        case SWMenuLevel::AMBIENT_EFFECT: activeVal = g_menuAmbientEffect; break;
+        default: break;
+    }
+
     for (uint8_t row = 0; row < SW_MAX_ROWS; row++) {
         uint8_t idx = off + row;
         if (idx >= count) break;
 
-        if (idx == snap.index) {
-            // ">" prefix marks selection (1 char column)
+        bool isSelected = (idx == snap.index);
+        bool isActive   = (activeVal != 0xFF && activeVal == table[idx].targetIndex);
+
+        // ">" prefix marks cursor selection (1 char column)
+        if (isSelected)
             gpDisplay->drawText(0, row, ">");
-            gpDisplay->drawText(1, row, table[idx].label);
-        } else {
-            // 2-char indent so text aligns with selected items
-            gpDisplay->drawText(2, row, table[idx].label);
-        }
+
+        // Label with 2-char indent so non-selected items align
+        gpDisplay->drawText(isSelected ? 1 : 2, row, table[idx].label);
+
+        // "*" in rightmost column marks the currently-active setting
+        if (isActive)
+            gpDisplay->drawText(20, row, "*");
     }
 
     gpDisplay->render();

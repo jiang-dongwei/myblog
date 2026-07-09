@@ -816,6 +816,8 @@ void ConfigUtils::initUnsetPropertiesWithDefaults(Config& config)
     INIT_UNSET_PROPERTY(config.addonOptions.fightpadAmbientLEDOptions, topBoardColorIndex, 0xFF);
     INIT_UNSET_PROPERTY(config.addonOptions.fightpadAmbientLEDOptions, bottomBoardColorIndex, 0xFF);
     INIT_UNSET_PROPERTY(config.addonOptions.fightpadAmbientLEDOptions, buttonFlashColorIndex, 0xFF);
+    INIT_UNSET_PROPERTY(config.addonOptions.fightpadAmbientLEDOptions, buttonEffectIndex, 0xFF);
+    INIT_UNSET_PROPERTY(config.addonOptions.fightpadAmbientLEDOptions, ambientEffectIndex, 0xFF);
 
     // addonOptions.pcf8575Options
     INIT_UNSET_PROPERTY(config.addonOptions.pcf8575Options, enabled, I2C_PCF8575_ENABLED);

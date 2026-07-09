@@ -209,15 +209,16 @@ namespace
             line2 += "-----";
         }
 
-        line2 += " FCC:";
+        std::string lineFCC = "FCC:";
         if (FightpadBQ27220BatteryAddon::isBatteryFullChargeCapacityValid()) {
-            line2 += std::to_string(FightpadBQ27220BatteryAddon::getBatteryFullChargeCapacityMah());
+            lineFCC += std::to_string(FightpadBQ27220BatteryAddon::getBatteryFullChargeCapacityMah());
         } else {
-            line2 += "-----";
+            lineFCC += "-----";
         }
 
         renderer->drawText(0, 0, line1);
         renderer->drawText(0, 1, line2);
+        renderer->drawText(0, 7, lineFCC);
 
 #if FIGHTPAD12SLIM_BQ27220_DATA_MEMORY_DIAGNOSTIC_DISPLAY
         if (FightpadBQ27220BatteryAddon::isBatteryDataMemoryDebugValid()) {

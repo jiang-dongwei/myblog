@@ -48,10 +48,14 @@
 // ── Menu tree definition (shared between Core0 nav and Core1 render) ─────
 
 enum class SWMenuLevel : uint8_t {
-    MAIN    = 0,  // Level 0: RP2350, ESP32C6, RGB Customize
-    RGB_SUB = 1,  // Level 1: Top Board, Bottom Board, Button
-    COLOR   = 2,  // Level 2: color names
-    INFO    = 3,  // Info pages (RP2350/ESP32C6)
+    MAIN          = 0,  // Level 0: RP2350, ESP32C6, RGB Customize
+    RGB_SUB       = 1,  // Level 1: Button, ButtonEffect, AmbientEffect, OFF
+    COLOR         = 2,  // Level 2: color names (Button RGB flash)
+    INFO          = 3,  // Info pages (RP2350/ESP32C6)
+    BUTTON_EFFECT = 4,  // Level 2: AnimationEffects picker
+    AMBIENT_EFFECT= 5,  // Level 2: AmbientEffectType picker
+    COLOR_BTN     = 6,  // Level 3: color picker under Button LED Effect → Static Color
+    COLOR_AMB     = 7,  // Level 3: color picker under Ambient LED Effect → Static Color
 };
 
 struct SWMenuItem {
@@ -71,6 +75,12 @@ extern const uint8_t      kMenuRgbSubCount;
 
 extern const SWMenuItem kMenuColors[];
 extern const uint8_t      kMenuColorsCount;
+
+extern const SWMenuItem kMenuButtonEffects[];
+extern const uint8_t      kMenuButtonEffectsCount;
+
+extern const SWMenuItem kMenuAmbientEffects[];
+extern const uint8_t      kMenuAmbientEffectsCount;
 
 // ── Cross-core state ─────────────────────────────────────────────────────
 
@@ -115,6 +125,12 @@ extern volatile uint8_t g_menuRgbButton;  // button-press flash color
 // Target being configured while the COLOR level is shown.
 // 0 = Top Board, 1 = Bottom Board, 2 = Button.  Set on entry from RGB_SUB.
 extern volatile uint8_t g_menuRgbTarget;
+
+// ── RGB effect overrides set from the menu ──────────────────────────────
+// 0xFF = not set (use default static-color breathing).
+// 0-4 = AnimationEffects / AmbientEffectType enum value.
+extern volatile uint8_t g_menuButtonEffect;   // GP22 button LED effect
+extern volatile uint8_t g_menuAmbientEffect;  // GP40 ambient LED effect
 
 // ── GPAddon (Core0) ──────────────────────────────────────────────────────
 

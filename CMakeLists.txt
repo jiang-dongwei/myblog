@@ -380,6 +380,14 @@ target_include_directories(${PROJECT_NAME}  PRIVATE
 
 pico_add_extra_outputs(${PROJECT_NAME})
 
+# Post-build: copy ELF to a stable name so VSCode Pico extension can find it
+add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        $<TARGET_FILE:${PROJECT_NAME}>
+        ${CMAKE_CURRENT_BINARY_DIR}/${PROJECT_NAME}.elf
+    COMMENT "Copying ELF to stable name for flashing"
+)
+
 install(FILES
     ${CMAKE_CURRENT_BINARY_DIR}/${PROJECT_NAME}_${CMAKE_PROJECT_VERSION}_${GP2040_BOARDCONFIG}.uf2
     ${CMAKE_CURRENT_LIST_DIR}/README.md

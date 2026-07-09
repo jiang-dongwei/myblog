@@ -107,6 +107,24 @@ metadata:
 | S7-A | g_menuRgb* 对齐 AnimationStation colors 索引 (0-15) | ✅ |
 | S7-B | FightpadAmbientLEDOptions protobuf message + Flash 持久化 | ✅ |
 | S7-C | 移除 DIP GPIO31/32 直接切换颜色 | ✅ |
+| S8-A | RGB_SUB 增加 Button LED Effect + Ambient LED Effect 菜单 | ✅ |
+
+## 菜单结构 (当前)
+
+```
+MAIN
+├── RP2350B FW Version    → INFO
+├── ESP32C6 Status        → INFO
+└── RGB Customize         → RGB_SUB
+    ├── Top Board RGB     → COLOR (9 colors)
+    ├── Bottom Board RGB  → COLOR
+    ├── Button RGB        → COLOR
+    ├── Button LED Effect → BUTTON_EFFECT (Static Color/Rainbow/Chase/Static Theme/Custom Theme)
+    ├── Ambient LED Effect→ AMBIENT_EFFECT (Static Color/Gradient/Chase/Breathing/Static Theme)
+    └── RGB OFF           → 即时关灯
+```
+
+- BUTTON_EFFECT / AMBIENT_EFFECT 目前仅菜单展示，不做实际灯光控制
 
 ## 已取消的功能
 

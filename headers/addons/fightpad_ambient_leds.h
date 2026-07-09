@@ -181,6 +181,8 @@ private:
     void previousEffect();
     void nextEffect();
     void render(uint32_t now);
+    void renderAmbient(uint32_t now);   // GP40 19-LED chain effects
+    void renderButtons(uint32_t now);   // GP22 12-LED chain effects
     void show();
     void fill(RGB color, float brightness = FIGHTPAD12SLIM_AMBIENT_BRIGHTNESS);
     void clearFrame();
@@ -200,6 +202,17 @@ private:
     uint32_t gp22FlashUntil[100] = {};
     uint32_t renderCounter = 0;
     bool enabled = FIGHTPAD12SLIM_AMBIENT_BOOT_ENABLE != 0;
+
+    // ── Effect animation state ──────────────────────────────
+    int16_t  wheelFrame = 0;          // rainbow color wheel position (0-255, signed for bounce)
+    bool     wheelReverse = false;    // bounce direction
+    uint8_t  chasePixel = 0;          // chase head position (shared by ambient + button)
+    uint32_t chaseLastMs = 0;         // last chase advance timestamp
+    float    breathBrightness = 0.0f; // breathing brightness
+    bool     breathDimming = false;   // start brightening (dim → bright)
+    uint8_t  breathColorCycle = 0;    // breath color cycle counter
+    uint8_t  lastAmbientEffect = 0xFF; // tracks previous ambient effect for reset
+    uint8_t  lastButtonEffect  = 0xFF; // tracks previous button effect for reset
 };
 
 #endif
