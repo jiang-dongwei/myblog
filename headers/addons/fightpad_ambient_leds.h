@@ -82,6 +82,10 @@
 #define FIGHTPAD12SLIM_AMBIENT_BOOT_ENABLE 1
 #endif
 
+#ifndef FIGHTPAD12SLIM_BUTTON_LEDS_COUNT
+#define FIGHTPAD12SLIM_BUTTON_LEDS_COUNT 12
+#endif
+
 #ifndef FIGHTPAD12SLIM_AMBIENT_GP22_LEDS_COUNT
 #define FIGHTPAD12SLIM_AMBIENT_GP22_LEDS_COUNT FIGHTPAD12SLIM_BUTTON_LEDS_COUNT
 #endif
@@ -206,8 +210,10 @@ private:
     // ── Effect animation state ──────────────────────────────
     int16_t  wheelFrame = 0;          // rainbow color wheel position (0-255, signed for bounce)
     bool     wheelReverse = false;    // bounce direction
-    uint8_t  chasePixel = 0;          // chase head position (shared by ambient + button)
-    uint32_t chaseLastMs = 0;         // last chase advance timestamp
+    uint8_t  ambientChasePixel = 0;   // GP40 chase head position
+    uint32_t ambientChaseLastMs = 0;  // GP40 last chase advance timestamp
+    uint8_t  buttonChasePixel = 0;    // GP22 bright chase lead position
+    uint32_t buttonChaseLastMs = 0;   // GP22 last chase advance timestamp
     float    breathBrightness = 0.0f; // breathing brightness
     bool     breathDimming = false;   // start brightening (dim → bright)
     uint8_t  breathColorCycle = 0;    // breath color cycle counter

@@ -17,6 +17,31 @@
 - 功能: 长按GP30进入→OLED显示多级菜单→拨轮导航→长按退出
 - 讨论ID: `2026-07-06-scrollwheel-menu`
 
+### Chase 动态变色修复
+- 物理硬件: 无新增硬件，复用 GP22 按键灯链与 GP40 环境灯链
+- 功能: RGB Customize 中 Chase 模式恢复动态变色，避免被 White/static color 覆盖
+- 讨论ID: `2026-07-09-chase-color-cycle-fix`
+
+### Base Chase 平滑亮度梯度
+- 物理硬件: 无新增硬件，复用 GP40 环境灯链
+- 功能: Base Effect 的 Chase 使用首尾暗、中间亮的 5 灯梯度，提升追逐流畅度
+- 讨论ID: `2026-07-09-base-chase-smooth-gradient`
+
+### Static Color 与 Breathing 拆分
+- 物理硬件: 无新增硬件，复用 GP22 按键灯链与 GP40 环境灯链
+- 功能: Base/Key 的 Static Color 改为固定选中颜色与固定亮度；Key Effect 新增 Breathing 选项承接原 Static Color 呼吸效果
+- 讨论ID: `2026-07-09-static-color-breathing-split`
+
+### Breathing Rainbow 与 Breathing Color 菜单拆分
+- 物理硬件: 无新增硬件，复用 GP22 按键灯链与 GP40 环境灯链
+- 功能: Base Effect 与 Key Effect 都提供自动变色呼吸 `Breathing Rainbow` 和可选单色呼吸 `Breathing Color`
+- 讨论ID: `2026-07-09-breathing-rainbow-color-menu`
+
+### RGB Effect 菜单精简
+- 物理硬件: 无新增硬件，复用 GP22 按键灯链与 GP40 环境灯链
+- 功能: Key Effect 删除 Static Theme，Key/Base 的 Breathing 都进入颜色菜单做单色呼吸或 OFF；Base Effect 删除自动变色 Breathing，Static Theme 改名 Rainbow
+- 讨论ID: `2026-07-09-rgb-effect-menu-trim`
+
 ## 开发步骤状态
 
 | 步骤 | 描述 | 状态 | 讨论ID |
@@ -31,3 +56,17 @@
 | S4-A | 全局颜色状态变量 + COLOR层级短按写入颜色 | completed | 2026-07-07-rgb-color-control |
 | S4-B | render()使用菜单颜色覆盖 + 按钮闪灯颜色 | completed | 2026-07-07-rgb-color-control |
 | S5-A | RGB_SUB增加"RGB OFF" + COLOR增加"OFF"色 | completed | 2026-07-07-rgb-off |
+| S6-A | Chase菜单选择时清空颜色覆盖 | completed | 2026-07-09-chase-color-cycle-fix |
+| S6-B | 渲染层按effect类型选择颜色源 | completed | 2026-07-09-chase-color-cycle-fix |
+| S6-C | Chase/Static Color/RGB OFF回归验证 | pending | 2026-07-09-chase-color-cycle-fix |
+| S7-A | Base Chase亮度梯度调整 | completed | 2026-07-09-base-chase-smooth-gradient |
+| S7-B | Button Chase前暗后亮梯度与其他RGB模式隔离确认 | completed | 2026-07-09-base-chase-smooth-gradient |
+| S8-A | Base/Key Static Color固定亮度渲染 | completed | 2026-07-09-static-color-breathing-split |
+| S8-B | Key Effect新增Breathing并迁移呼吸逻辑 | completed | 2026-07-09-static-color-breathing-split |
+| S8-C | Static/Breathing/Chase/Rainbow回归验证 | pending | 2026-07-09-static-color-breathing-split |
+| S9-A | Base/Key Effect菜单拆分Breathing Rainbow与Breathing Color | completed | 2026-07-09-breathing-rainbow-color-menu |
+| S9-B | Base/Key Breathing Color颜色选择层级与渲染 | completed | 2026-07-09-breathing-rainbow-color-menu |
+| S9-C | Breathing Rainbow/Breathing Color实机验证 | pending | 2026-07-09-breathing-rainbow-color-menu |
+| S10-A | Key Effect删除Static Theme并将Breathing改为单色呼吸颜色菜单 | completed | 2026-07-09-rgb-effect-menu-trim |
+| S10-B | Base Effect删除自动变色Breathing并将Static Theme改名Rainbow | completed | 2026-07-09-rgb-effect-menu-trim |
+| S10-C | Key/Base菜单项与选色行为实机验证 | pending | 2026-07-09-rgb-effect-menu-trim |

@@ -43,24 +43,24 @@ const SWMenuItem kMenuColors[] = {
 };
 const uint8_t kMenuColorsCount = sizeof(kMenuColors) / sizeof(kMenuColors[0]);
 
-// Button LED effect picker — maps to proto AnimationEffects enum.
-// targetIndex = effect ordinal (EFFECT_STATIC_COLOR=0..EFFECT_STATIC_THEME=3).
+// Button LED effect picker. Existing render indices remain stable:
+// 0=Static Color, 1=Rainbow, 2=Chase, 4=Breathing.
 const SWMenuItem kMenuButtonEffects[] = {
-    { "Static Color",  SWMenuLevel::COLOR_BTN, 0 },
-    { "Rainbow",       SWMenuLevel::INFO,       1 },
-    { "Chase",         SWMenuLevel::INFO,       2 },
-    { "Static Theme",  SWMenuLevel::INFO,       3 },
+    { "Static Color", SWMenuLevel::COLOR_BTN,        0 },
+    { "Breathing",    SWMenuLevel::COLOR_BTN_BREATH, 4 },
+    { "Rainbow",      SWMenuLevel::INFO,             1 },
+    { "Chase",        SWMenuLevel::INFO,             2 },
 };
 const uint8_t kMenuButtonEffectsCount = sizeof(kMenuButtonEffects) / sizeof(kMenuButtonEffects[0]);
 
-// Ambient LED effect picker — maps to proto AmbientEffectType enum.
-// targetIndex = effect ordinal (AL_CUSTOM_EFFECT_STATIC_COLOR=0..AL_CUSTOM_EFFECT_STATIC_THEME=4).
+// Ambient LED effect picker. Existing indices remain stable:
+// 0=Static Color, 1=Gradient, 2=Chase, 4=Rainbow, 5=Breathing.
 const SWMenuItem kMenuAmbientEffects[] = {
-    { "Static Color",  SWMenuLevel::COLOR_AMB, 0 },
-    { "Gradient",      SWMenuLevel::INFO,       1 },
-    { "Chase",         SWMenuLevel::INFO,       2 },
-    { "Breathing",     SWMenuLevel::INFO,       3 },
-    { "Static Theme",  SWMenuLevel::INFO,       4 },
+    { "Static Color", SWMenuLevel::COLOR_AMB,        0 },
+    { "Gradient",     SWMenuLevel::INFO,             1 },
+    { "Chase",        SWMenuLevel::INFO,             2 },
+    { "Breathing",    SWMenuLevel::COLOR_AMB_BREATH, 5 },
+    { "Rainbow",      SWMenuLevel::INFO,             4 },
 };
 const uint8_t kMenuAmbientEffectsCount = sizeof(kMenuAmbientEffects) / sizeof(kMenuAmbientEffects[0]);
 
@@ -152,7 +152,10 @@ const SWMenuItem* ScrollWheelMenuAddon::currentMenuTable() const {
         case SWMenuLevel::RGB_SUB:        return kMenuRgbSub;
         case SWMenuLevel::COLOR:
         case SWMenuLevel::COLOR_BTN:
-        case SWMenuLevel::COLOR_AMB:      return kMenuColors;
+        case SWMenuLevel::COLOR_AMB:
+        case SWMenuLevel::COLOR_BTN_BREATH:
+        case SWMenuLevel::COLOR_AMB_BREATH:
+                                             return kMenuColors;
         case SWMenuLevel::BUTTON_EFFECT:  return kMenuButtonEffects;
         case SWMenuLevel::AMBIENT_EFFECT: return kMenuAmbientEffects;
         default:                          return kMenuMain;
@@ -165,7 +168,10 @@ uint8_t ScrollWheelMenuAddon::currentItemCount() const {
         case SWMenuLevel::RGB_SUB:        return kMenuRgbSubCount;
         case SWMenuLevel::COLOR:
         case SWMenuLevel::COLOR_BTN:
-        case SWMenuLevel::COLOR_AMB:      return kMenuColorsCount;
+        case SWMenuLevel::COLOR_AMB:
+        case SWMenuLevel::COLOR_BTN_BREATH:
+        case SWMenuLevel::COLOR_AMB_BREATH:
+                                             return kMenuColorsCount;
         case SWMenuLevel::BUTTON_EFFECT:  return kMenuButtonEffectsCount;
         case SWMenuLevel::AMBIENT_EFFECT: return kMenuAmbientEffectsCount;
         default:                          return kMenuMainCount;
@@ -196,7 +202,10 @@ static void clampScrollOffset() {
         case SWMenuLevel::RGB_SUB:        count = kMenuRgbSubCount; break;
         case SWMenuLevel::COLOR:
         case SWMenuLevel::COLOR_BTN:
-        case SWMenuLevel::COLOR_AMB:      count = kMenuColorsCount; break;
+        case SWMenuLevel::COLOR_AMB:
+        case SWMenuLevel::COLOR_BTN_BREATH:
+        case SWMenuLevel::COLOR_AMB_BREATH:
+                                             count = kMenuColorsCount; break;
         case SWMenuLevel::BUTTON_EFFECT:  count = kMenuButtonEffectsCount; break;
         case SWMenuLevel::AMBIENT_EFFECT: count = kMenuAmbientEffectsCount; break;
         default: return;
@@ -292,6 +301,28 @@ void ScrollWheelMenuAddon::navSelect() {
         return;
     }
 
+    // COLOR_BTN_BREATH: color picker under Button LED Effect -> Breathing.
+    if (currentLevel == SWMenuLevel::COLOR_BTN_BREATH) {
+        const SWMenuItem* table = currentMenuTable();
+        uint8_t colorIdx = table[idx].targetIndex;
+        g_menuRgbTop       = colorIdx;
+        g_menuButtonEffect = 4;               // enable Breathing effect
+        persistConfig();
+        markMenuDirty();
+        return;
+    }
+
+    // COLOR_AMB_BREATH: color picker under Ambient LED Effect -> Breathing.
+    if (currentLevel == SWMenuLevel::COLOR_AMB_BREATH) {
+        const SWMenuItem* table = currentMenuTable();
+        uint8_t colorIdx = table[idx].targetIndex;
+        g_menuRgbBottom      = colorIdx;
+        g_menuAmbientEffect  = 5;             // enable Breathing effect
+        persistConfig();
+        markMenuDirty();
+        return;
+    }
+
     // BUTTON_EFFECT / AMBIENT_EFFECT: terminal effect items (targetLevel==INFO)
     // apply the effect immediately.  Non-terminal items (e.g. Static Color →
     // COLOR_BTN) fall through to the general navigation below.
@@ -301,16 +332,16 @@ void ScrollWheelMenuAddon::navSelect() {
         const SWMenuItem& item = table[idx];
         if (item.targetLevel == SWMenuLevel::INFO) {
             uint8_t effectIdx = item.targetIndex;
-            // Auto-reset black color to white when picking a non-Static-Color
-            // effect (Rainbow/Chase/etc.) so the effect is immediately visible.
+            // Terminal effects apply immediately. Chase owns its dynamic color
+            // source, so drop any saved static-color override for that chain.
             if (currentLevel == SWMenuLevel::BUTTON_EFFECT) {
                 g_menuButtonEffect = effectIdx;
-                if (effectIdx != 0 && g_menuRgbTop == 0)
-                    g_menuRgbTop = 1;   // white
+                if (effectIdx == 2)
+                    g_menuRgbTop = 0xFF; // Chase uses dynamic colors, not static color override.
             } else {
                 g_menuAmbientEffect = effectIdx;
-                if (effectIdx != 0 && g_menuRgbBottom == 0)
-                    g_menuRgbBottom = 1; // white
+                if (effectIdx == 2)
+                    g_menuRgbBottom = 0xFF; // Chase uses dynamic colors, not static color override.
             }
             persistConfig();
             markMenuDirty();
@@ -416,6 +447,20 @@ void ScrollWheelMenuAddon::navBack() {
         // Back to AMBIENT_EFFECT (Static Color = index 0)
         g_menuState.level = static_cast<uint8_t>(SWMenuLevel::AMBIENT_EFFECT);
         g_menuState.index = 0;
+        g_menuState.scrollOffset = 0;
+        markMenuDirty();
+        break;
+    case SWMenuLevel::COLOR_BTN_BREATH:
+        // Back to BUTTON_EFFECT (Breathing = index 1)
+        g_menuState.level = static_cast<uint8_t>(SWMenuLevel::BUTTON_EFFECT);
+        g_menuState.index = 1;
+        g_menuState.scrollOffset = 0;
+        markMenuDirty();
+        break;
+    case SWMenuLevel::COLOR_AMB_BREATH:
+        // Back to AMBIENT_EFFECT (Breathing = index 3)
+        g_menuState.level = static_cast<uint8_t>(SWMenuLevel::AMBIENT_EFFECT);
+        g_menuState.index = 3;
         g_menuState.scrollOffset = 0;
         markMenuDirty();
         break;

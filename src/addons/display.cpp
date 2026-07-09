@@ -296,6 +296,8 @@ void DisplayAddon::drawScrollWheelMenu() {
         case SWMenuLevel::COLOR:
         case SWMenuLevel::COLOR_BTN:
         case SWMenuLevel::COLOR_AMB:
+        case SWMenuLevel::COLOR_BTN_BREATH:
+        case SWMenuLevel::COLOR_AMB_BREATH:
             table = kMenuColors; count = kMenuColorsCount; break;
         case SWMenuLevel::BUTTON_EFFECT:
             table = kMenuButtonEffects; count = kMenuButtonEffectsCount; break;
@@ -324,6 +326,8 @@ void DisplayAddon::drawScrollWheelMenu() {
         case SWMenuLevel::COLOR:       activeVal = g_menuRgbButton;    break;
         case SWMenuLevel::COLOR_BTN:   activeVal = g_menuRgbTop;       break;
         case SWMenuLevel::COLOR_AMB:   activeVal = g_menuRgbBottom;    break;
+        case SWMenuLevel::COLOR_BTN_BREATH: activeVal = g_menuRgbTop;    break;
+        case SWMenuLevel::COLOR_AMB_BREATH: activeVal = g_menuRgbBottom; break;
         case SWMenuLevel::BUTTON_EFFECT:  activeVal = g_menuButtonEffect;  break;
         case SWMenuLevel::AMBIENT_EFFECT: activeVal = g_menuAmbientEffect; break;
         default: break;

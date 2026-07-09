@@ -15,19 +15,19 @@ endif()
 if(DEFINED ENV{PICO_BOARD})
   set(PICO_BOARD $ENV{PICO_BOARD} CACHE STRING "Board type")
 else()
-  set(PICO_BOARD pico CACHE STRING "Board type")
+  set(PICO_BOARD fightpad12slim CACHE STRING "Board type")
 endif()
 
 if(DEFINED ENV{PICO_PLATFORM})
   set(PICO_PLATFORM $ENV{PICO_PLATFORM} CACHE STRING "Board platform")
 else()
-  set(PICO_PLATFORM rp2040 CACHE STRING "Board platform")
+  set(PICO_PLATFORM rp2350-arm-s CACHE STRING "Board platform")
 endif()
 
 if(DEFINED ENV{GP2040_BOARDCONFIG})
   set(GP2040_BOARDCONFIG $ENV{GP2040_BOARDCONFIG})
 elseif(NOT DEFINED GP2040_BOARDCONFIG)
-  set(GP2040_BOARDCONFIG Pico)
+  set(GP2040_BOARDCONFIG Fightpad12Slim)
 endif()
 
 # check for existing cmake files in the event of changing PICO_BOARD or PICO_PLATFORM

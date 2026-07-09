@@ -82,6 +82,14 @@ static RGB menuIndexToColor(uint8_t idx) {
     return ColorBlack;  // fallback
 }
 
+static RGB chaseColorFor(uint16_t ledIndex, uint16_t ledCount, int16_t wheelFrame) {
+    uint16_t phase = static_cast<uint16_t>(wheelFrame);
+    if (ledCount > 0) {
+        phase += static_cast<uint16_t>((ledIndex * 256U) / ledCount);
+    }
+    return RGB::wheel(static_cast<uint8_t>(phase));
+}
+
 bool FightpadAmbientLEDAddon::available() {
     if (FIGHTPAD12SLIM_AMBIENT_CONTROL_DIAGNOSTIC) {
         return true;
@@ -486,15 +494,14 @@ void FightpadAmbientLEDAddon::renderAmbient(uint32_t now) {
     const uint8_t count = FIGHTPAD12SLIM_AMBIENT_LEDS_COUNT; // 19
 
     uint8_t effect = g_menuAmbientEffect;
-    // 0xFF = never set by menu → use default static-color breathing.
+    // 0xFF = never set by menu → use default static color.
     if (effect == 0xFF) effect = 0;
 
     switch (effect) {
     default:
-    case 0: // AL_CUSTOM_EFFECT_STATIC_COLOR — breathing brightness
+    case 0: // AL_CUSTOM_EFFECT_STATIC_COLOR — fixed selected color
         {
-            float b = getBreathBrightness(now);
-            uint32_t v = baseColor.value(fmt, b);
+            uint32_t v = baseColor.value(fmt, 0.5f);
             for (int i = 0; i < count; i++) frame[i] = v;
         }
         break;
@@ -516,27 +523,28 @@ void FightpadAmbientLEDAddon::renderAmbient(uint32_t now) {
         }
         break;
 
-    case 2: // AL_CUSTOM_EFFECT_CHASE — 4 lit LEDs running around the chain
+    case 2: // AL_CUSTOM_EFFECT_CHASE — 5 lit LEDs running around the chain
         {
             // Advance chase head every ~200 ms
-            if (now - chaseLastMs >= 200) {
-                chaseLastMs = now;
-                chasePixel++;
-                if (chasePixel >= count) chasePixel = 0;
+            if (now - ambientChaseLastMs >= 200) {
+                ambientChaseLastMs = now;
+                ambientChasePixel++;
+                if (ambientChasePixel >= count) ambientChasePixel = 0;
+                wheelFrame = static_cast<int16_t>((wheelFrame + 8) & 0xFF);
             }
             // All off first
             for (int i = 0; i < count; i++) frame[i] = 0;
-            // Light 4 consecutive LEDs with brightness gradient using
-            // the user-selected baseColor: edges dim, center bright.
-            static const float grad[4] = {0.1f, 1.0f, 0.5f, 0.1f};
-            for (int i = 0; i < 4; i++) {
-                int idx = (chasePixel + i) % count;
-                frame[idx] = baseColor.value(fmt, grad[i]);
+            // Light 5 consecutive LEDs with a symmetric brightness gradient using
+            // dynamic wheel colors: edges dim, center bright.
+            static const float grad[5] = {0.05f, 0.25f, 0.80f, 0.25f, 0.05f};
+            for (int i = 0; i < 5; i++) {
+                int idx = (ambientChasePixel + i) % count;
+                frame[idx] = chaseColorFor(idx, count, wheelFrame).value(fmt, grad[i]);
             }
         }
         break;
 
-    case 3: // AL_CUSTOM_EFFECT_BREATH — brightness oscillation with color cycling
+    case 3: // AL_CUSTOM_EFFECT_BREATHING_RAINBOW — brightness oscillation with color cycling
         {
             // Reset breath state on effect entry: always start dim→bright.
             if (lastAmbientEffect != 3) {
@@ -581,15 +589,30 @@ void FightpadAmbientLEDAddon::renderAmbient(uint32_t now) {
         }
         break;
 
-    case 4: // AL_CUSTOM_EFFECT_STATIC_THEME — repeat 8-color row across chain
+    case 4: // AL_CUSTOM_EFFECT_RAINBOW — each LED a different rainbow phase
         {
-            constexpr int COLS = 8;
-            int themeIdx = 0;  // static theme index; could be made selectable
             for (int i = 0; i < count; i++) {
-                uint32_t v = kAmbientThemeRows[themeIdx][i % COLS]
-                    .value(fmt, 0.5f);
-                frame[i] = v;
+                uint8_t phase = static_cast<uint8_t>(
+                    wheelFrame + ((i * 256U) / count));
+                RGB c = RGB::wheel(phase);
+                frame[i] = c.value(fmt, 0.5f);
             }
+            // Advance & bounce wheel, matching Key Effect Rainbow.
+            if (wheelReverse) {
+                wheelFrame -= 1;
+                if (wheelFrame < 0) { wheelFrame = 1; wheelReverse = false; }
+            } else {
+                wheelFrame += 1;
+                if (wheelFrame > 255) { wheelFrame = 254; wheelReverse = true; }
+            }
+        }
+        break;
+
+    case 5: // AL_CUSTOM_EFFECT_BREATHING_COLOR — selected color breathing
+        {
+            float b = getBreathBrightness(now);
+            uint32_t v = baseColor.value(fmt, b);
+            for (int i = 0; i < count; i++) frame[i] = v;
         }
         break;
     }
@@ -617,15 +640,14 @@ void FightpadAmbientLEDAddon::renderButtons(uint32_t now) {
     uint32_t flashV = flashColor.value(fmt, 1.0f);
 
     uint8_t effect = g_menuButtonEffect;
-    // 0xFF = never set by menu → use default static-color breathing.
+    // 0xFF = never set by menu → use default static color.
     if (effect == 0xFF) effect = 0;
 
     switch (effect) {
     default:
-    case 0: // EFFECT_STATIC_COLOR — breathing brightness + per-LED flash
+    case 0: // EFFECT_STATIC_COLOR — fixed selected color + per-LED flash
         {
-            float b = getBreathBrightness(now);
-            uint32_t baseV = baseColor.value(fmt, b);
+            uint32_t baseV = baseColor.value(fmt, 0.5f);
             for (int i = 0; i < count; i++) {
                 frame_gp22[i] = (now < gp22FlashUntil[i]) ? flashV : baseV;
             }
@@ -654,34 +676,56 @@ void FightpadAmbientLEDAddon::renderButtons(uint32_t now) {
 
     case 2: // EFFECT_CHASE — 3 adjacent LEDs lit, brightness gradient
         {
-            // Advance chase head every ~500 ms
-            if (now - chaseLastMs >= 500) {
-                chaseLastMs = now;
-                chasePixel++;
-                if (chasePixel >= count) chasePixel = 0;
+            // Advance chase bright lead point every ~200 ms
+            if (now - buttonChaseLastMs >= 200) {
+                buttonChaseLastMs = now;
+                buttonChasePixel++;
+                if (buttonChasePixel >= count) buttonChasePixel = 0;
+                wheelFrame = static_cast<int16_t>((wheelFrame + 8) & 0xFF);
             }
             // Base: all off, but flash overlays win
             for (int i = 0; i < count; i++) {
                 frame_gp22[i] = (now < gp22FlashUntil[i]) ? flashV : 0;
             }
-            // Light 3 consecutive LEDs with brightness gradient using
-            // the user-selected baseColor: edges dim, center bright.
-            static const float grad[3] = {0.15f, 1.0f, 0.15f};
+            // New LEDs enter bright, then fade as the chase moves forward.
+            static const float grad[3] = {0.60f, 0.25f, 0.05f};
             for (int i = 0; i < 3; i++) {
-                int idx = (chasePixel + i) % count;
-                uint32_t cv = baseColor.value(fmt, grad[i]);
+                int idx = (buttonChasePixel + count - i) % count;
+                uint32_t cv = chaseColorFor(idx, count, wheelFrame).value(fmt, grad[i]);
                 frame_gp22[idx] = (now < gp22FlashUntil[idx]) ? flashV : cv;
             }
         }
         break;
 
-    case 3: // EFFECT_STATIC_THEME — repeat 8-color row across 12 LEDs
+    case 3: // EFFECT_STATIC_THEME — legacy hidden menu option
         {
             constexpr int COLS = 8;
             int themeIdx = 0;
             for (int i = 0; i < count; i++) {
                 uint32_t baseV = kAmbientThemeRows[themeIdx][i % COLS]
                     .value(fmt, 0.5f);
+                frame_gp22[i] = (now < gp22FlashUntil[i]) ? flashV : baseV;
+            }
+        }
+        break;
+
+    case 4: // EFFECT_BREATHING — selected color breathing + per-LED flash
+        {
+            float b = getBreathBrightness(now);
+            uint32_t baseV = baseColor.value(fmt, b);
+            for (int i = 0; i < count; i++) {
+                frame_gp22[i] = (now < gp22FlashUntil[i]) ? flashV : baseV;
+            }
+        }
+        break;
+
+    case 5: // EFFECT_BREATHING_RAINBOW — color cycling breathing + per-LED flash
+        {
+            float b = getBreathBrightness(now);
+            uint8_t phase = static_cast<uint8_t>((now / 40U) & 0xFFU);
+            RGB c = RGB::wheel(phase);
+            uint32_t baseV = c.value(fmt, b);
+            for (int i = 0; i < count; i++) {
                 frame_gp22[i] = (now < gp22FlashUntil[i]) ? flashV : baseV;
             }
         }

@@ -54,8 +54,10 @@ enum class SWMenuLevel : uint8_t {
     INFO          = 3,  // Info pages (RP2350/ESP32C6)
     BUTTON_EFFECT = 4,  // Level 2: AnimationEffects picker
     AMBIENT_EFFECT= 5,  // Level 2: AmbientEffectType picker
-    COLOR_BTN     = 6,  // Level 3: color picker under Button LED Effect → Static Color
-    COLOR_AMB     = 7,  // Level 3: color picker under Ambient LED Effect → Static Color
+    COLOR_BTN     = 6,  // Level 3: color picker under Button LED Effect -> Static Color
+    COLOR_AMB     = 7,  // Level 3: color picker under Ambient LED Effect -> Static Color
+    COLOR_BTN_BREATH = 8, // Level 3: color picker under Button LED Effect -> Breathing
+    COLOR_AMB_BREATH = 9, // Level 3: color picker under Ambient LED Effect -> Breathing
 };
 
 struct SWMenuItem {
@@ -127,8 +129,8 @@ extern volatile uint8_t g_menuRgbButton;  // button-press flash color
 extern volatile uint8_t g_menuRgbTarget;
 
 // ── RGB effect overrides set from the menu ──────────────────────────────
-// 0xFF = not set (use default static-color breathing).
-// 0-4 = AnimationEffects / AmbientEffectType enum value.
+// 0xFF = not set (use default static color).
+// 0-5 = Fightpad-specific LED effect index.
 extern volatile uint8_t g_menuButtonEffect;   // GP22 button LED effect
 extern volatile uint8_t g_menuAmbientEffect;  // GP40 ambient LED effect
 
