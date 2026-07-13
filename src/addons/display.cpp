@@ -4,17 +4,22 @@
  */
 
 #include "addons/display.h"
+#include "addons/fightpad_esp32_proxy.h"
 #include "addons/scrollwheel_menu.h"
 #include "GamepadState.h"
 #include "enums.h"
 #include "storagemanager.h"
 #include "pico/stdlib.h"
+#include "pico/version.h"
 
 #include "drivermanager.h"
 #include "usbdriver.h"
 #include "version.h"
 #include "config.pb.h"
 #include "class/hid/hid.h"
+
+#include <cstdio>
+#include <cstring>
 
 bool DisplayAddon::available() {
     const DisplayOptions& options = Storage::getInstance().getDisplayOptions();
@@ -268,11 +273,52 @@ void DisplayAddon::drawScrollWheelMenu() {
     if (level == SWMenuLevel::INFO) {
         if (snap.infoSource == 0) {
             if (snap.index == 0) {
+                char infoLine[22] = {};
                 gpDisplay->drawText(0, 0, "RP2350B Firmware");
-                gpDisplay->drawText(0, 1, "Version Info");
+
+                std::snprintf(infoLine, sizeof(infoLine), "SDK: %.16s", PICO_SDK_VERSION_STRING);
+                gpDisplay->drawText(0, 1, infoLine);
+
+                std::snprintf(infoLine, sizeof(infoLine), "Plat: %.15s", GP2040PLATFORM);
+                gpDisplay->drawText(0, 2, infoLine);
+
+                std::snprintf(infoLine, sizeof(infoLine), "Board: %.14s", GP2040_BOARDCONFIG);
+                gpDisplay->drawText(0, 3, infoLine);
+
+                gpDisplay->drawText(0, 4, "CPU: Cortex-M33");
+                gpDisplay->drawText(0, 7, "Back: press");
+                gpDisplay->render();
+                return;
             } else {
-                gpDisplay->drawText(0, 0, "ESP32C6 Status");
-                gpDisplay->drawText(0, 1, "Information");
+                FightpadESP32FirmwareInfo firmwareInfo = {};
+                char infoLine[22] = {};
+                gpDisplay->drawText(0, 0, "ESP32C6 Firmware");
+
+                if (getFightpadESP32FirmwareInfo(firmwareInfo)) {
+                    std::snprintf(infoLine, sizeof(infoLine), "SDK: %.16s", firmwareInfo.sdk);
+                    gpDisplay->drawText(0, 1, infoLine);
+
+                    std::snprintf(infoLine, sizeof(infoLine), "Plat: %.15s", firmwareInfo.platform);
+                    gpDisplay->drawText(0, 2, infoLine);
+
+                    gpDisplay->drawText(0, 3, "Board:");
+                    std::snprintf(infoLine, sizeof(infoLine), "%.21s", firmwareInfo.board);
+                    gpDisplay->drawText(0, 4, infoLine);
+
+                    if (std::strlen(firmwareInfo.board) > 21) {
+                        std::snprintf(infoLine, sizeof(infoLine), "%.21s", firmwareInfo.board + 21);
+                        gpDisplay->drawText(0, 5, infoLine);
+                    }
+
+                    std::snprintf(infoLine, sizeof(infoLine), "CPU: %.16s", firmwareInfo.cpu);
+                    gpDisplay->drawText(0, 6, infoLine);
+                } else {
+                    gpDisplay->drawText(0, 3, "Coming to soon");
+                }
+
+                gpDisplay->drawText(0, 7, "Back: press");
+                gpDisplay->render();
+                return;
             }
         } else {
             gpDisplay->drawText(0, 0, "RGB Color:");

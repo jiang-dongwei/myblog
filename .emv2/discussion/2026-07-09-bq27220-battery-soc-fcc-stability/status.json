@@ -1,0 +1,21 @@
+{
+  "discussion_id": "2026-07-09-bq27220-battery-soc-fcc-stability",
+  "created_at": "2026-07-09",
+  "current_phase": 5,
+  "phases": {
+    "split": "completed",
+    "requirements": "completed",
+    "hardware": "completed",
+    "brainstorm": "completed",
+    "milestones": "completed"
+  },
+  "subsystems": [
+    "BQ27220 配置与初始化",
+    "BQ27220 SOC/FCC 跳变诊断",
+    "低电压与系统重启保护",
+    "RP2350 与 ESP32 电量信息链路",
+    "OLED 电量显示与调试信息",
+    "实机验证流程"
+  ],
+  "current_subsystem": 0
+}

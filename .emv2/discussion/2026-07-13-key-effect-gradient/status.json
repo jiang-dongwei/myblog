@@ -1,0 +1,19 @@
+{
+  "discussion_id": "2026-07-13-key-effect-gradient",
+  "created_at": "2026-07-13",
+  "current_phase": 5,
+  "phases": {
+    "split": "completed",
+    "requirements": "completed",
+    "hardware": "completed",
+    "brainstorm": "completed",
+    "milestones": "completed"
+  },
+  "subsystems": [
+    "Key Effect 菜单入口",
+    "GP22 Gradient 渲染",
+    "配置持久化",
+    "验证"
+  ],
+  "current_subsystem": 0
+}

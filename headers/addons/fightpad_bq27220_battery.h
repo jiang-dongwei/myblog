@@ -62,6 +62,26 @@
 #define FIGHTPAD12SLIM_BQ27220_TAPER_CURRENT_MA 25
 #endif
 
+#ifndef FIGHTPAD12SLIM_BQ27220_TAPER_VOLTAGE_MV
+#define FIGHTPAD12SLIM_BQ27220_TAPER_VOLTAGE_MV 100
+#endif
+
+#ifndef FIGHTPAD12SLIM_BQ27220_BATTERY_LOW_PERCENT_X100
+#define FIGHTPAD12SLIM_BQ27220_BATTERY_LOW_PERCENT_X100 700
+#endif
+
+#ifndef FIGHTPAD12SLIM_BQ27220_EDV_CMP
+#define FIGHTPAD12SLIM_BQ27220_EDV_CMP 0
+#endif
+
+#ifndef FIGHTPAD12SLIM_BQ27220_INDEPENDENT_CHARGER
+#define FIGHTPAD12SLIM_BQ27220_INDEPENDENT_CHARGER 1
+#endif
+
+#ifndef FIGHTPAD12SLIM_BQ27220_CSYNC
+#define FIGHTPAD12SLIM_BQ27220_CSYNC 1
+#endif
+
 #ifndef FIGHTPAD12SLIM_BQ27220_BATTERY_MIN_VOLTAGE_MV
 #define FIGHTPAD12SLIM_BQ27220_BATTERY_MIN_VOLTAGE_MV 2750
 #endif
@@ -83,6 +103,13 @@
 #endif
 
 #define FightpadBQ27220BatteryName "FightpadBQ27220Battery"
+
+static_assert(FIGHTPAD12SLIM_BQ27220_EDV_CMP == 0 || FIGHTPAD12SLIM_BQ27220_EDV_CMP == 1,
+    "FIGHTPAD12SLIM_BQ27220_EDV_CMP must be 0 or 1");
+static_assert(FIGHTPAD12SLIM_BQ27220_INDEPENDENT_CHARGER == 0 || FIGHTPAD12SLIM_BQ27220_INDEPENDENT_CHARGER == 1,
+    "FIGHTPAD12SLIM_BQ27220_INDEPENDENT_CHARGER must be 0 or 1");
+static_assert(FIGHTPAD12SLIM_BQ27220_CSYNC == 0 || FIGHTPAD12SLIM_BQ27220_CSYNC == 1,
+    "FIGHTPAD12SLIM_BQ27220_CSYNC must be 0 or 1");
 
 class FightpadBQ27220BatteryAddon : public GPAddon {
 public:
@@ -140,7 +167,8 @@ public:
 
 private:
     void configurePins();
-    bool configureBatteryGauge();
+    bool checkBatteryGaugeConfiguration(bool& configurationCurrent, bool& requiresReinitialization);
+    bool configureBatteryGauge(bool reinitialize);
     bool enterFullAccessMode();
     bool sendUnsealKeys(uint16_t key1, uint16_t key2);
     bool sendFullAccessKeys();
@@ -150,6 +178,8 @@ private:
     bool readOperationStatus(uint8_t& statusLow, uint8_t& statusHigh);
     bool writeControlWord(uint16_t command);
     bool writeManufacturerAccessWord(uint16_t command);
+    bool readDataMemoryWord(uint16_t address, uint16_t& value);
+    bool updateDataMemoryWordBits(uint16_t address, uint16_t clearMask, uint16_t setMask, ReadStatus verifyFailureStatus);
     bool writeDataMemoryWord(uint16_t address, uint16_t value, ReadStatus verifyFailureStatus);
     bool readRegisterBytes(uint8_t command, uint8_t* data, uint8_t length);
     bool writeRegisterBytes(uint8_t command, const uint8_t* data, uint8_t length);

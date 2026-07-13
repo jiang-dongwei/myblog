@@ -1,0 +1,20 @@
+{
+  "discussion_id": "2026-07-13-esp32-firmware-info-uart",
+  "created_at": "2026-07-13",
+  "current_phase": 5,
+  "phases": {
+    "split": "completed",
+    "requirements": "completed",
+    "hardware": "completed",
+    "brainstorm": "completed",
+    "milestones": "completed"
+  },
+  "subsystems": [
+    "UART 接收接入",
+    "固件信息帧状态机",
+    "Payload 解析与信息缓存",
+    "ESP32 固件菜单页面",
+    "验证"
+  ],
+  "current_subsystem": 0
+}

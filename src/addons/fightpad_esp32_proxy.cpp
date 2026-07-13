@@ -4,6 +4,9 @@
 #include "storagemanager.h"
 #include "tusb.h"
 
+#include "hardware/sync.h"
+#include "pico/critical_section.h"
+
 #include <algorithm>
 #include <cstring>
 
@@ -12,13 +15,79 @@ constexpr uint8_t kFrameMagic0 = 0x46;
 constexpr uint8_t kFrameMagicReport = 0x50;
 constexpr uint8_t kFrameMagicTransport = 0x54;
 constexpr uint8_t kFrameMagicBattery = 0x42;
+constexpr uint8_t kFrameMagicFirmwareInfo = 0x49;
+constexpr uint8_t kFrameLength = 8;
+constexpr uint8_t kFirmwareInfoFlagMask = 0xC0;
+constexpr uint8_t kFirmwareInfoSeqMask = 0x3F;
+constexpr uint8_t kFirmwareInfoFlagSingle = 0x00;
+constexpr uint8_t kFirmwareInfoFlagLast = 0x40;
+constexpr uint8_t kFirmwareInfoFlagMiddle = 0x80;
+constexpr uint8_t kFirmwareInfoFlagFirst = 0xC0;
 constexpr uint16_t kAdcFullScale = 4095;
 constexpr uint16_t kBatterySampleCount = 8;
 constexpr float kBatteryDividerScale = 2.0f;
 constexpr float kBatteryAdcReferenceMv = 3300.0f;
+
+FightpadESP32FirmwareInfo firmwareInfoSnapshot = {};
+critical_section_t firmwareInfoCriticalSection = {};
+volatile uint32_t firmwareInfoSnapshotVersion = 0;
+
+bool firmwareInfoKeyMatches(const uint8_t *key, size_t keyLength, const char *expected)
+{
+    size_t expectedLength = std::strlen(expected);
+    return keyLength == expectedLength && std::memcmp(key, expected, expectedLength) == 0;
+}
+
+bool copyFirmwareInfoValue(char *destination, size_t destinationSize, const uint8_t *value, size_t valueLength)
+{
+    if (valueLength == 0 || valueLength >= destinationSize) {
+        return false;
+    }
+
+    for (size_t i = 0; i < valueLength; i++) {
+        if (value[i] == 0 || value[i] == '\r' || value[i] == '\n') {
+            return false;
+        }
+    }
+
+    std::memcpy(destination, value, valueLength);
+    destination[valueLength] = '\0';
+    return true;
+}
+
+void publishFirmwareInfo(const FightpadESP32FirmwareInfo& info)
+{
+    critical_section_enter_blocking(&firmwareInfoCriticalSection);
+    firmwareInfoSnapshotVersion++;
+    __dmb();
+    firmwareInfoSnapshot = info;
+    __dmb();
+    firmwareInfoSnapshotVersion++;
+    critical_section_exit(&firmwareInfoCriticalSection);
+}
 }
 
 static FightpadESP32ProxyAddon *activeProxy = nullptr;
+
+bool getFightpadESP32FirmwareInfo(FightpadESP32FirmwareInfo& info)
+{
+    info = {};
+    if (!critical_section_is_initialized(&firmwareInfoCriticalSection)) {
+        return false;
+    }
+
+    critical_section_enter_blocking(&firmwareInfoCriticalSection);
+    uint32_t versionBefore = firmwareInfoSnapshotVersion;
+    __dmb();
+    info = firmwareInfoSnapshot;
+    __dmb();
+    uint32_t versionAfter = firmwareInfoSnapshotVersion;
+    critical_section_exit(&firmwareInfoCriticalSection);
+
+    return versionBefore == versionAfter &&
+           (versionAfter & 1u) == 0 &&
+           info.valid;
+}
 
 #ifndef FIGHTPAD12SLIM_ESP32_PROXY_TRANSPORT_DIAGNOSTIC_PIN
 #define FIGHTPAD12SLIM_ESP32_PROXY_TRANSPORT_DIAGNOSTIC_PIN -1
@@ -76,6 +145,10 @@ void FightpadESP32ProxyAddon::setup()
     loadOptions();
     refreshTurboPinMask();
     activeProxy = this;
+
+    if (!critical_section_is_initialized(&firmwareInfoCriticalSection)) {
+        critical_section_init(&firmwareInfoCriticalSection);
+    }
 
     if (isValidPin(FIGHTPAD12SLIM_TRANSPORT_SEL_PIN)) {
         gpio_init(FIGHTPAD12SLIM_TRANSPORT_SEL_PIN);
@@ -141,10 +214,16 @@ void FightpadESP32ProxyAddon::process()
         return;
     }
 
+    checkFirmwareInfoTimeout();
+
 #if FIGHTPAD12SLIM_ESP32_PROXY_CDC_DESC_ENABLED
     drainCdcToBuffer();
     drainBufferToUart();
+#endif
+
     drainUartToBuffer();
+
+#if FIGHTPAD12SLIM_ESP32_PROXY_CDC_DESC_ENABLED
     drainBufferToCdc();
 #endif
 }
@@ -163,6 +242,8 @@ void FightpadESP32ProxyAddon::postprocess(bool sent)
 void FightpadESP32ProxyAddon::reinit()
 {
     refreshTurboPinMask();
+    firmwareInfoFrameLength = 0;
+    resetFirmwareInfoSequence();
     lastInputReportValid = false;
     lastTransportModeValid = false;
     lastBatteryPercentValid = false;
@@ -297,8 +378,15 @@ void FightpadESP32ProxyAddon::drainBufferToUart()
 
 void FightpadESP32ProxyAddon::drainUartToBuffer()
 {
-    while (uart_is_readable(uart) && !uartToCdc.full()) {
-        uartToCdc.push(uart_getc(uart));
+    while (uart_is_readable(uart)) {
+        uint8_t value = uart_getc(uart);
+        feedFirmwareInfoByte(value);
+
+#if FIGHTPAD12SLIM_ESP32_PROXY_CDC_DESC_ENABLED && CFG_TUD_CDC
+        if (!uartToCdc.full()) {
+            uartToCdc.push(value);
+        }
+#endif
     }
 }
 
@@ -337,6 +425,246 @@ void FightpadESP32ProxyAddon::drainBufferToCdc()
 
     tud_cdc_write_flush();
 #endif
+}
+
+void FightpadESP32ProxyAddon::checkFirmwareInfoTimeout()
+{
+    uint32_t now = getMillis();
+
+    if (firmwareInfoFrameLength > 0 &&
+        (now - firmwareInfoLastByteTimeMs) >= FIGHTPAD12SLIM_ESP32_FW_INFO_TIMEOUT_MS) {
+        firmwareInfoFrameLength = 0;
+    }
+
+    if (firmwareInfoSequenceActive &&
+        (now - firmwareInfoLastFrameTimeMs) >= FIGHTPAD12SLIM_ESP32_FW_INFO_TIMEOUT_MS) {
+        resetFirmwareInfoSequence();
+    }
+}
+
+void FightpadESP32ProxyAddon::feedFirmwareInfoByte(uint8_t value)
+{
+    uint32_t now = getMillis();
+
+    if (firmwareInfoFrameLength == 0) {
+        if (value == kFrameMagic0) {
+            firmwareInfoFrame[0] = value;
+            firmwareInfoFrameLength = 1;
+            firmwareInfoLastByteTimeMs = now;
+        }
+        return;
+    }
+
+    if (firmwareInfoFrameLength == 1) {
+        if (value == kFrameMagicFirmwareInfo) {
+            firmwareInfoFrame[1] = value;
+            firmwareInfoFrameLength = 2;
+            firmwareInfoLastByteTimeMs = now;
+        } else if (value == kFrameMagic0) {
+            firmwareInfoFrame[0] = value;
+            firmwareInfoLastByteTimeMs = now;
+        } else {
+            firmwareInfoFrameLength = 0;
+        }
+        return;
+    }
+
+    firmwareInfoFrame[firmwareInfoFrameLength++] = value;
+    firmwareInfoLastByteTimeMs = now;
+    if (firmwareInfoFrameLength < kFrameLength) {
+        return;
+    }
+
+    uint8_t checksum = 0;
+    for (uint8_t i = 0; i < kFrameLength - 1; i++) {
+        checksum ^= firmwareInfoFrame[i];
+    }
+
+    if (checksum == firmwareInfoFrame[kFrameLength - 1]) {
+        handleFirmwareInfoFrame(firmwareInfoFrame);
+        firmwareInfoFrameLength = 0;
+        return;
+    }
+
+    resetFirmwareInfoSequence();
+    resyncFirmwareInfoFrame();
+}
+
+void FightpadESP32ProxyAddon::resyncFirmwareInfoFrame()
+{
+    uint8_t preservedStart = kFrameLength;
+    uint8_t preservedLength = 0;
+
+    for (uint8_t i = 1; i < kFrameLength; i++) {
+        if (firmwareInfoFrame[i] != kFrameMagic0) {
+            continue;
+        }
+
+        if (i == kFrameLength - 1) {
+            preservedStart = i;
+            preservedLength = 1;
+            break;
+        }
+
+        if (firmwareInfoFrame[i + 1] == kFrameMagicFirmwareInfo) {
+            preservedStart = i;
+            preservedLength = kFrameLength - i;
+            break;
+        }
+    }
+
+    if (preservedLength > 0) {
+        std::memmove(firmwareInfoFrame, firmwareInfoFrame + preservedStart, preservedLength);
+        firmwareInfoFrameLength = preservedLength;
+        firmwareInfoLastByteTimeMs = getMillis();
+    } else {
+        firmwareInfoFrameLength = 0;
+    }
+}
+
+void FightpadESP32ProxyAddon::handleFirmwareInfoFrame(const uint8_t frame[8])
+{
+    uint8_t flag = frame[2] & kFirmwareInfoFlagMask;
+    uint8_t seq = frame[2] & kFirmwareInfoSeqMask;
+    const uint8_t *payload = frame + 3;
+    uint32_t now = getMillis();
+
+    if (flag == kFirmwareInfoFlagFirst) {
+        resetFirmwareInfoSequence();
+        if (seq != 0) {
+            return;
+        }
+
+        firmwareInfoSequenceActive = true;
+        firmwareInfoExpectedSeq = 1;
+        firmwareInfoLastFrameTimeMs = now;
+        if (!appendFirmwareInfoPayload(payload)) {
+            resetFirmwareInfoSequence();
+        }
+        return;
+    }
+
+    if (flag == kFirmwareInfoFlagSingle) {
+        resetFirmwareInfoSequence();
+        if (appendFirmwareInfoPayload(payload)) {
+            parseFirmwareInfoPayload();
+        }
+        resetFirmwareInfoSequence();
+        return;
+    }
+
+    if (!firmwareInfoSequenceActive || seq != firmwareInfoExpectedSeq) {
+        resetFirmwareInfoSequence();
+        return;
+    }
+
+    if (!appendFirmwareInfoPayload(payload)) {
+        resetFirmwareInfoSequence();
+        return;
+    }
+
+    firmwareInfoExpectedSeq = (seq + 1) & kFirmwareInfoSeqMask;
+    firmwareInfoLastFrameTimeMs = now;
+
+    if (flag == kFirmwareInfoFlagLast) {
+        firmwareInfoSequenceActive = false;
+        parseFirmwareInfoPayload();
+        resetFirmwareInfoSequence();
+    } else if (flag != kFirmwareInfoFlagMiddle) {
+        resetFirmwareInfoSequence();
+    }
+}
+
+void FightpadESP32ProxyAddon::resetFirmwareInfoSequence()
+{
+    firmwareInfoPayloadLength = 0;
+    firmwareInfoExpectedSeq = 0;
+    firmwareInfoSequenceActive = false;
+    firmwareInfoLastFrameTimeMs = 0;
+}
+
+bool FightpadESP32ProxyAddon::appendFirmwareInfoPayload(const uint8_t payload[4])
+{
+    if (firmwareInfoPayloadLength + 4 > FIGHTPAD12SLIM_ESP32_FW_INFO_PAYLOAD_SIZE) {
+        return false;
+    }
+
+    std::memcpy(firmwareInfoPayload + firmwareInfoPayloadLength, payload, 4);
+    firmwareInfoPayloadLength += 4;
+    return true;
+}
+
+bool FightpadESP32ProxyAddon::parseFirmwareInfoPayload()
+{
+    uint16_t payloadLength = firmwareInfoPayloadLength;
+    while (payloadLength > 0 && firmwareInfoPayload[payloadLength - 1] == 0) {
+        payloadLength--;
+    }
+    if (payloadLength == 0) {
+        return false;
+    }
+
+    FightpadESP32FirmwareInfo parsed = {};
+    bool hasSdk = false;
+    bool hasPlatform = false;
+    bool hasBoard = false;
+    bool hasCpu = false;
+    uint16_t lineStart = 0;
+
+    while (lineStart < payloadLength) {
+        uint16_t lineEnd = lineStart;
+        while (lineEnd < payloadLength && firmwareInfoPayload[lineEnd] != '\n') {
+            lineEnd++;
+        }
+        if (lineEnd >= payloadLength) {
+            return false;
+        }
+
+        uint16_t equals = lineStart;
+        while (equals < lineEnd && firmwareInfoPayload[equals] != '=') {
+            equals++;
+        }
+        if (equals == lineStart || equals >= lineEnd) {
+            return false;
+        }
+
+        const uint8_t *key = firmwareInfoPayload + lineStart;
+        size_t keyLength = equals - lineStart;
+        const uint8_t *value = firmwareInfoPayload + equals + 1;
+        size_t valueLength = lineEnd - equals - 1;
+
+        if (firmwareInfoKeyMatches(key, keyLength, "SDK")) {
+            if (hasSdk || !copyFirmwareInfoValue(parsed.sdk, sizeof(parsed.sdk), value, valueLength)) {
+                return false;
+            }
+            hasSdk = true;
+        } else if (firmwareInfoKeyMatches(key, keyLength, "Plat")) {
+            if (hasPlatform || !copyFirmwareInfoValue(parsed.platform, sizeof(parsed.platform), value, valueLength)) {
+                return false;
+            }
+            hasPlatform = true;
+        } else if (firmwareInfoKeyMatches(key, keyLength, "Board")) {
+            if (hasBoard || !copyFirmwareInfoValue(parsed.board, sizeof(parsed.board), value, valueLength)) {
+                return false;
+            }
+            hasBoard = true;
+        } else if (firmwareInfoKeyMatches(key, keyLength, "CPU")) {
+            if (hasCpu || !copyFirmwareInfoValue(parsed.cpu, sizeof(parsed.cpu), value, valueLength)) {
+                return false;
+            }
+            hasCpu = true;
+        }
+
+        lineStart = lineEnd + 1;
+    }
+
+    if (!hasSdk || !hasPlatform || !hasBoard || !hasCpu) {
+        return false;
+    }
+
+    parsed.valid = true;
+    publishFirmwareInfo(parsed);
+    return true;
 }
 
 void FightpadESP32ProxyAddon::refreshTurboPinMask()

@@ -10,6 +10,7 @@ namespace
     static constexpr uint8_t BQ27220_COMMAND_CURRENT = 0x0C;
     static constexpr uint8_t BQ27220_COMMAND_FULL_CHARGE_CAPACITY = 0x12;
     static constexpr uint8_t BQ27220_COMMAND_STATE_OF_CHARGE = 0x2C;
+    static constexpr uint8_t BQ27220_COMMAND_DESIGN_CAPACITY = 0x3C;
     static constexpr uint8_t BQ27220_COMMAND_OPERATION_STATUS = 0x3A;
     static constexpr uint8_t BQ27220_COMMAND_DATA_MEMORY_ADDRESS = 0x3E;
     static constexpr uint8_t BQ27220_COMMAND_MANUFACTURER_ACCESS_CONTROL = 0x3E;
@@ -23,16 +24,27 @@ namespace
     static constexpr uint16_t BQ27220_CONTROL_FULL_ACCESS = 0xFFFF;
     static constexpr uint16_t BQ27220_CONTROL_ENTER_CONFIG_UPDATE = 0x0090;
     static constexpr uint16_t BQ27220_CONTROL_EXIT_CONFIG_UPDATE_REINIT = 0x0091;
+    static constexpr uint16_t BQ27220_CONTROL_EXIT_CONFIG_UPDATE = 0x0092;
     static constexpr uint16_t BQ27220_DATA_CHARGING_VOLTAGE = 0x91FD;
     static constexpr uint16_t BQ27220_DATA_TAPER_CURRENT = 0x9201;
+    static constexpr uint16_t BQ27220_DATA_BATTERY_LOW_PERCENT = 0x9251;
+    static constexpr uint16_t BQ27220_DATA_SOC_FLAG_CONFIG_A = 0x927F;
+    static constexpr uint16_t BQ27220_DATA_CEDV_GAUGING_CONFIG = 0x929B;
     static constexpr uint16_t BQ27220_DATA_FULL_CHARGE_CAPACITY = 0x929D;
     static constexpr uint16_t BQ27220_DATA_DESIGN_CAPACITY = 0x929F;
     static constexpr uint16_t BQ27220_DATA_DESIGN_VOLTAGE = 0x92A3;
+    static constexpr uint16_t BQ27220_DATA_TAPER_VOLTAGE = 0x92A5;
     static constexpr uint16_t BQ27220_DATA_FIXED_EDV0 = 0x92B4;
     static constexpr uint16_t BQ27220_DATA_FIXED_EDV1 = 0x92B7;
     static constexpr uint16_t BQ27220_DATA_FIXED_EDV2 = 0x92BA;
     static constexpr uint16_t BQ27220_DATA_VOLTAGE_0_DOD = 0x92BD;
     static constexpr uint16_t BQ27220_DATA_VOLTAGE_100_DOD = 0x92D1;
+    static constexpr uint16_t BQ27220_CEDV_SC_MASK = 0x0010;
+    static constexpr uint16_t BQ27220_CEDV_EDV_CMP_MASK = 0x0008;
+    static constexpr uint16_t BQ27220_CEDV_CSYNC_MASK = 0x0002;
+    static constexpr uint16_t BQ27220_CEDV_MANAGED_MASK =
+        BQ27220_CEDV_SC_MASK | BQ27220_CEDV_EDV_CMP_MASK | BQ27220_CEDV_CSYNC_MASK;
+    static constexpr uint16_t BQ27220_SOC_FLAG_PRIMARY_TERMINATION_MASK = 0x0C00;
     static constexpr uint8_t BQ27220_OPERATION_STATUS_CFGUPDATE_MASK = 0x04;
     static constexpr uint8_t BQ27220_SHORT_MAC_DATA_LENGTH = 0x06;
     static constexpr uint16_t I2C_SCL_HIGH_TIMEOUT_US = 10000;
@@ -137,8 +149,12 @@ void FightpadBQ27220BatteryAddon::process()
 
 #if FIGHTPAD12SLIM_BQ27220_CONFIGURE_RAM
     if (!batteryConfigApplied && !batteryConfigAttempted) {
-        batteryConfigAttempted = true;
-        batteryConfigApplied = configureBatteryGauge();
+        bool configurationCurrent = false;
+        bool requiresReinitialization = false;
+        if (checkBatteryGaugeConfiguration(configurationCurrent, requiresReinitialization)) {
+            batteryConfigAttempted = true;
+            batteryConfigApplied = configurationCurrent || configureBatteryGauge(requiresReinitialization);
+        }
     }
 #endif
 
@@ -308,7 +324,50 @@ void FightpadBQ27220BatteryAddon::configurePins()
     pinsConfigured = true;
 }
 
-bool FightpadBQ27220BatteryAddon::configureBatteryGauge()
+bool FightpadBQ27220BatteryAddon::checkBatteryGaugeConfiguration(bool& configurationCurrent, bool& requiresReinitialization)
+{
+#if !FIGHTPAD12SLIM_BQ27220_CONFIGURE_RAM
+    configurationCurrent = true;
+    requiresReinitialization = false;
+    return true;
+#else
+    configurationCurrent = false;
+    requiresReinitialization = false;
+
+    uint16_t designCapacity = 0;
+    if (!readWord(BQ27220_COMMAND_DESIGN_CAPACITY, designCapacity)) {
+        return false;
+    }
+
+    if (!enterFullAccessMode()) {
+        return false;
+    }
+
+    uint16_t cedvConfig = 0;
+    if (!readDataMemoryWord(BQ27220_DATA_CEDV_GAUGING_CONFIG, cedvConfig)) {
+        return false;
+    }
+
+    uint16_t targetCedvBits = 0;
+    if (FIGHTPAD12SLIM_BQ27220_INDEPENDENT_CHARGER) {
+        targetCedvBits |= BQ27220_CEDV_SC_MASK;
+    }
+    if (FIGHTPAD12SLIM_BQ27220_EDV_CMP) {
+        targetCedvBits |= BQ27220_CEDV_EDV_CMP_MASK;
+    }
+    if (FIGHTPAD12SLIM_BQ27220_CSYNC) {
+        targetCedvBits |= BQ27220_CEDV_CSYNC_MASK;
+    }
+
+    requiresReinitialization = designCapacity != FIGHTPAD12SLIM_BQ27220_DESIGN_CAPACITY_MAH;
+    const bool cedvConfigCurrent =
+        (cedvConfig & BQ27220_CEDV_MANAGED_MASK) == targetCedvBits;
+    configurationCurrent = !requiresReinitialization && cedvConfigCurrent;
+    return true;
+#endif
+}
+
+bool FightpadBQ27220BatteryAddon::configureBatteryGauge(bool reinitialize)
 {
 #if !FIGHTPAD12SLIM_BQ27220_CONFIGURE_RAM
     return true;
@@ -329,6 +388,29 @@ bool FightpadBQ27220BatteryAddon::configureBatteryGauge()
         ok = writeDataMemoryWord(BQ27220_DATA_TAPER_CURRENT, FIGHTPAD12SLIM_BQ27220_TAPER_CURRENT_MA, ReadStatus::CONFIG_VERIFY_TAPER_FAILED);
     }
     if (ok) {
+        ok = writeDataMemoryWord(BQ27220_DATA_TAPER_VOLTAGE, FIGHTPAD12SLIM_BQ27220_TAPER_VOLTAGE_MV, ReadStatus::CONFIG_VERIFY_FAILED);
+    }
+    if (ok) {
+        ok = writeDataMemoryWord(BQ27220_DATA_BATTERY_LOW_PERCENT, FIGHTPAD12SLIM_BQ27220_BATTERY_LOW_PERCENT_X100, ReadStatus::CONFIG_VERIFY_FAILED);
+    }
+    if (ok) {
+        uint16_t cedvBits = 0;
+        if (FIGHTPAD12SLIM_BQ27220_INDEPENDENT_CHARGER) {
+            cedvBits |= BQ27220_CEDV_SC_MASK;
+        }
+        if (FIGHTPAD12SLIM_BQ27220_EDV_CMP) {
+            cedvBits |= BQ27220_CEDV_EDV_CMP_MASK;
+        }
+        if (FIGHTPAD12SLIM_BQ27220_CSYNC) {
+            cedvBits |= BQ27220_CEDV_CSYNC_MASK;
+        }
+        ok = updateDataMemoryWordBits(BQ27220_DATA_CEDV_GAUGING_CONFIG, BQ27220_CEDV_MANAGED_MASK, cedvBits, ReadStatus::CONFIG_VERIFY_FAILED);
+    }
+    if (ok) {
+        ok = updateDataMemoryWordBits(BQ27220_DATA_SOC_FLAG_CONFIG_A, 0, BQ27220_SOC_FLAG_PRIMARY_TERMINATION_MASK, ReadStatus::CONFIG_VERIFY_FAILED);
+    }
+    // Restore the FCC baseline only after the gauge RAM has returned to defaults.
+    if (ok && reinitialize) {
         ok = writeDataMemoryWord(BQ27220_DATA_FULL_CHARGE_CAPACITY, FIGHTPAD12SLIM_BQ27220_DESIGN_CAPACITY_MAH, ReadStatus::CONFIG_VERIFY_FCC_FAILED);
     }
     if (ok) {
@@ -355,7 +437,10 @@ bool FightpadBQ27220BatteryAddon::configureBatteryGauge()
 
     bool exitOk = true;
     if (enteredConfig) {
-        exitOk = writeControlWord(BQ27220_CONTROL_EXIT_CONFIG_UPDATE_REINIT);
+        const uint16_t exitCommand = reinitialize ?
+            BQ27220_CONTROL_EXIT_CONFIG_UPDATE_REINIT :
+            BQ27220_CONTROL_EXIT_CONFIG_UPDATE;
+        exitOk = writeControlWord(exitCommand);
         if (exitOk) {
             exitOk = waitForConfigUpdateMode(false);
         }
@@ -490,6 +575,37 @@ bool FightpadBQ27220BatteryAddon::writeManufacturerAccessWord(uint16_t command)
     const bool ok = writeRegisterBytes(BQ27220_COMMAND_MANUFACTURER_ACCESS_CONTROL, data, sizeof(data));
     sleep_ms(2);
     return ok;
+}
+
+bool FightpadBQ27220BatteryAddon::readDataMemoryWord(uint16_t address, uint16_t& value)
+{
+    const uint8_t addressBytes[2] = {
+        static_cast<uint8_t>(address & 0xFF),
+        static_cast<uint8_t>((address >> 8) & 0xFF),
+    };
+    if (!writeRegisterBytes(BQ27220_COMMAND_DATA_MEMORY_ADDRESS, addressBytes, sizeof(addressBytes))) {
+        return false;
+    }
+    sleep_ms(10);
+
+    uint8_t data[2] = {0, 0};
+    if (!readRegisterBytes(BQ27220_COMMAND_BLOCK_DATA, data, sizeof(data))) {
+        return false;
+    }
+
+    value = static_cast<uint16_t>((static_cast<uint16_t>(data[0]) << 8) | data[1]);
+    return true;
+}
+
+bool FightpadBQ27220BatteryAddon::updateDataMemoryWordBits(uint16_t address, uint16_t clearMask, uint16_t setMask, ReadStatus verifyFailureStatus)
+{
+    uint16_t value = 0;
+    if (!readDataMemoryWord(address, value)) {
+        return false;
+    }
+
+    value = static_cast<uint16_t>((value & static_cast<uint16_t>(~clearMask)) | setMask);
+    return writeDataMemoryWord(address, value, verifyFailureStatus);
 }
 
 bool FightpadBQ27220BatteryAddon::writeDataMemoryWord(uint16_t address, uint16_t value, ReadStatus verifyFailureStatus)

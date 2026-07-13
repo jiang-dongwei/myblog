@@ -210,6 +210,8 @@ private:
     // ── Effect animation state ──────────────────────────────
     int16_t  wheelFrame = 0;          // rainbow color wheel position (0-255, signed for bounce)
     bool     wheelReverse = false;    // bounce direction
+    int16_t  buttonGradientFrame = 0; // GP22 Gradient color wheel position
+    bool     buttonGradientReverse = false; // GP22 Gradient bounce direction
     uint8_t  ambientChasePixel = 0;   // GP40 chase head position
     uint32_t ambientChaseLastMs = 0;  // GP40 last chase advance timestamp
     uint8_t  buttonChasePixel = 0;    // GP22 bright chase lead position

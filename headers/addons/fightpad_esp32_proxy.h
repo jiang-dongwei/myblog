@@ -68,6 +68,30 @@
 #define FIGHTPAD12SLIM_ESP32_PROXY_BUFFER_SIZE 2048
 #endif
 
+#ifndef FIGHTPAD12SLIM_ESP32_FW_INFO_PAYLOAD_SIZE
+#define FIGHTPAD12SLIM_ESP32_FW_INFO_PAYLOAD_SIZE 256
+#endif
+
+#ifndef FIGHTPAD12SLIM_ESP32_FW_INFO_TIMEOUT_MS
+#define FIGHTPAD12SLIM_ESP32_FW_INFO_TIMEOUT_MS 200
+#endif
+
+#ifndef FIGHTPAD12SLIM_ESP32_FW_INFO_SDK_SIZE
+#define FIGHTPAD12SLIM_ESP32_FW_INFO_SDK_SIZE 24
+#endif
+
+#ifndef FIGHTPAD12SLIM_ESP32_FW_INFO_PLATFORM_SIZE
+#define FIGHTPAD12SLIM_ESP32_FW_INFO_PLATFORM_SIZE 24
+#endif
+
+#ifndef FIGHTPAD12SLIM_ESP32_FW_INFO_BOARD_SIZE
+#define FIGHTPAD12SLIM_ESP32_FW_INFO_BOARD_SIZE 64
+#endif
+
+#ifndef FIGHTPAD12SLIM_ESP32_FW_INFO_CPU_SIZE
+#define FIGHTPAD12SLIM_ESP32_FW_INFO_CPU_SIZE 24
+#endif
+
 #ifndef FIGHTPAD12SLIM_ESP32_PROXY_INPUT_REPORT_ENABLED
 #define FIGHTPAD12SLIM_ESP32_PROXY_INPUT_REPORT_ENABLED 0
 #endif
@@ -125,6 +149,18 @@
 
 #define FightpadESP32ProxyName "FightpadESP32Proxy"
 
+struct FightpadESP32FirmwareInfo {
+    bool valid = false;
+    char sdk[FIGHTPAD12SLIM_ESP32_FW_INFO_SDK_SIZE] = {};
+    char platform[FIGHTPAD12SLIM_ESP32_FW_INFO_PLATFORM_SIZE] = {};
+    char board[FIGHTPAD12SLIM_ESP32_FW_INFO_BOARD_SIZE] = {};
+    char cpu[FIGHTPAD12SLIM_ESP32_FW_INFO_CPU_SIZE] = {};
+};
+
+// Core1 uses this function to obtain one complete copy of the information
+// parsed and published by the Core0 UART addon.
+bool getFightpadESP32FirmwareInfo(FightpadESP32FirmwareInfo& info);
+
 class FightpadESP32ProxyAddon : public GPAddon {
 public:
     virtual bool available();
@@ -160,6 +196,13 @@ private:
     void drainBufferToUart();
     void drainUartToBuffer();
     void drainBufferToCdc();
+    void checkFirmwareInfoTimeout();
+    void feedFirmwareInfoByte(uint8_t value);
+    void resyncFirmwareInfoFrame();
+    void handleFirmwareInfoFrame(const uint8_t frame[8]);
+    void resetFirmwareInfoSequence();
+    bool appendFirmwareInfoPayload(const uint8_t payload[4]);
+    bool parseFirmwareInfoPayload();
     void refreshTurboPinMask();
     bool isBluetoothTransportSelected() const;
     void sendTransportModeFrame(bool bluetoothSelected, bool force = false);
@@ -190,6 +233,14 @@ private:
     bool lastDtr = false;
     bool lastRts = false;
     bool initialized = false;
+    uint8_t firmwareInfoFrame[8] = {};
+    uint8_t firmwareInfoFrameLength = 0;
+    uint8_t firmwareInfoPayload[FIGHTPAD12SLIM_ESP32_FW_INFO_PAYLOAD_SIZE] = {};
+    uint16_t firmwareInfoPayloadLength = 0;
+    uint8_t firmwareInfoExpectedSeq = 0;
+    bool firmwareInfoSequenceActive = false;
+    uint32_t firmwareInfoLastByteTimeMs = 0;
+    uint32_t firmwareInfoLastFrameTimeMs = 0;
     uint32_t turboPinMask = 0;
     uint32_t lastInputReportTimeMs = 0;
     uint8_t lastInputReport[8] = {};

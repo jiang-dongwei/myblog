@@ -44,9 +44,10 @@ const SWMenuItem kMenuColors[] = {
 const uint8_t kMenuColorsCount = sizeof(kMenuColors) / sizeof(kMenuColors[0]);
 
 // Button LED effect picker. Existing render indices remain stable:
-// 0=Static Color, 1=Rainbow, 2=Chase, 4=Breathing.
+// 0=Static Color, 1=Rainbow, 2=Chase, 4=Breathing, 6=Gradient.
 const SWMenuItem kMenuButtonEffects[] = {
     { "Static Color", SWMenuLevel::COLOR_BTN,        0 },
+    { "Gradient",     SWMenuLevel::INFO,             6 },
     { "Breathing",    SWMenuLevel::COLOR_BTN_BREATH, 4 },
     { "Rainbow",      SWMenuLevel::INFO,             1 },
     { "Chase",        SWMenuLevel::INFO,             2 },

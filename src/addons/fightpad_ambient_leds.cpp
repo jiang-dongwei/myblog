@@ -731,6 +731,31 @@ void FightpadAmbientLEDAddon::renderButtons(uint32_t now) {
         }
         break;
 
+    case 6: // EFFECT_GRADIENT — all LEDs same shifting rainbow + per-LED flash
+        {
+            RGB c = RGB::wheel(static_cast<uint8_t>(buttonGradientFrame));
+            uint32_t baseV = c.value(fmt, 0.5f);
+            for (int i = 0; i < count; i++) {
+                frame_gp22[i] = (now < gp22FlashUntil[i]) ? flashV : baseV;
+            }
+
+            // Match Base Gradient's step and bounce without sharing its phase state.
+            if (buttonGradientReverse) {
+                buttonGradientFrame -= 2;
+                if (buttonGradientFrame < 0) {
+                    buttonGradientFrame = 1;
+                    buttonGradientReverse = false;
+                }
+            } else {
+                buttonGradientFrame += 2;
+                if (buttonGradientFrame > 255) {
+                    buttonGradientFrame = 254;
+                    buttonGradientReverse = true;
+                }
+            }
+        }
+        break;
+
     }
 }
 

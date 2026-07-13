@@ -918,7 +918,7 @@ message FightpadAmbientLEDOptions
     optional uint32 topBoardColorIndex = 1;     // GP22 12-LED chain (button lights)
     optional uint32 bottomBoardColorIndex = 2;  // GP40 19-LED chain (ambient base)
     optional uint32 buttonFlashColorIndex = 3;  // button-press flash color
-    optional uint32 buttonEffectIndex = 4;      // Fightpad LED effect index (0-5), 0xFF=default
+    optional uint32 buttonEffectIndex = 4;      // Fightpad LED effect index (0-6), 0xFF=default
     optional uint32 ambientEffectIndex = 5;     // Fightpad LED effect index (0-5), 0xFF=default
 }
 

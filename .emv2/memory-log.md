@@ -203,3 +203,137 @@ Base Effect 和 Key Effect 都需要同时提供两个呼吸灯入口：
 - 修复 OLED 菜单渲染遗漏：`DisplayAddon::drawScrollWheelMenu()` 现在识别 `COLOR_BTN_BREATH` / `COLOR_AMB_BREATH`，Breathing 下一级颜色菜单不再显示异常，并能正确标记当前颜色。
 - 更新 `FightpadAmbientLEDOptions` 注释，effect index 范围从 `0-4` 修正为 `0-5`。
 - Base Effect 的 `Rainbow` 不再复用旧 Static Theme 色表，改为与 Key Effect `Rainbow` 同类算法：每颗灯按 LED 序号分配不同色轮相位，并随 `wheelFrame` 滚动。
+
+## 2026-07-10: BQ27220 电量 SOC/FCC 稳定性规划 (S11)
+
+### 现象
+
+- OLED 显示 75% 时电压约 3781mV。
+- 电量到 52% 后直接跳变到 7%。
+- FCC 从 650 跳变成 522。
+- 5% 电量时电压约 3556mV，0% 时约 3512mV。
+- 电量耗尽后灯乱闪，RP2350/ESP32 反复重启，重启后 FCC 又恢复到 650。
+
+### 约束
+
+- BQ27220 直接电池供电，不会跟随 RP2350/ESP32 系统重启。
+- BQ27220 最低工作电压约 2.4V，低于产品电池截止电压 2.75V。
+- GP24 会影响 RP2350 和 ESP32，但不影响 BQ27220。
+- 不实现串口日志、Flash 日志或 ESP32 侧日志。
+- 不改 ESP32 相关代码。
+- 不改 OLED 正常显示。
+- 低电时仍保持正常 BQ 配置流程。
+
+### 决策
+
+1. 先审计当前 BQ27220 开机配置写入行为，重点确认 FCC 是否被每次写回 650。
+2. 使用现有 OLED 诊断页进行人工记录，不新增日志。
+3. S11-C 是实机复测流程，不是代码功能；用 SOC/V/I/FCC/状态码记录关键跳变点。
+4. 低电保护只评估 RP2350 灯效侧降耗，不改 OLED、不改 ESP32、不直接关 GP24。
+
+### S11-A 审计记录
+
+- `FIGHTPAD12SLIM_BQ27220_CONFIGURE_RAM = 1` 时，RP2350 每次重启后都会重新尝试 BQ27220 RAM 配置。
+- 当前配置写入列表包含 `BQ27220_DATA_FULL_CHARGE_CAPACITY`。
+- `BQ27220_DATA_FULL_CHARGE_CAPACITY` 的目标值来自 `FIGHTPAD12SLIM_BQ27220_DESIGN_CAPACITY_MAH = 650`。
+- 如果 BQ27220 学习/计算出的 FCC 已经变为 522，RP2350 重启后配置流程会把 FCC 写回 650。
+- 这与低电 brownout 重启后 FCC 恢复 650 的实测现象吻合。
+
+### S11-B 审计记录
+
+- 当前 BQ27220 addon 已读取 SOC、Voltage、Current、FCC、ReadStatus、Security Status 和 Data Memory Debug 信息。
+- 当前 OLED 诊断页已显示 SOC、V、I、FCC、错误码和 Security 状态简码。
+- 在“不实现日志、不改 OLED 正常显示、不改 ESP32”的约束下，S11-C 人工复测所需字段已经具备。
+- S11-B 无需新增固件代码。
+
+### 讨论ID
+`2026-07-09-bq27220-battery-soc-fcc-stability`
+
+## 2026-07-10: RP2350B 固件信息菜单规划 (S12)
+
+### 需求
+
+- 用户通过原理图确认主控为 RP2350B。
+- 将菜单现有 `RP2350B FW Version` 信息页从占位内容改为真实固件信息。
+- 显示 Pico SDK 版本、平台、板级配置和 Cortex-M33。
+
+### 决策
+
+1. 直接在 Core1 的 `DisplayAddon::drawScrollWheelMenu()` 中读取编译期版本宏。
+2. 不扩展 Core0/Core1 共享菜单状态，不写 Flash。
+3. 使用 22 字节缓冲区限制每行最多 21 个可见字符。
+4. 保持 INFO 页拨轮禁用、短按返回的现有导航行为。
+5. 不修改 ESP32 INFO 页和其他菜单。
+
+### 讨论ID
+
+`2026-07-10-rp2350-firmware-info-menu`
+
+### 实现记录
+
+- `DisplayAddon::drawScrollWheelMenu()` 的 RP2350B INFO 分支使用 `PICO_SDK_VERSION_STRING`、`GP2040PLATFORM` 和 `GP2040_BOARDCONFIG`。
+- 页面显示 RP2350B、Pico SDK、Cortex-M33 和当前目标信息；不显示 Git FW、Build ID 和 Debug/Release 类型。
+- 动态字段使用 22 字节缓冲区和格式精度限制，最多显示 21 个字符。
+- ESP32 和 RGB INFO 页继续保留原有占位显示。
+- `git diff --check` 通过；按用户约定未编译，S12-C 等待用户实机验证。
+
+## 2026-07-13: ESP32-C6 固件信息串口接收与菜单显示规划 (S13)
+
+### 需求
+
+- 复用 RP2350B UART0 GP44/GP45 接收 ESP32-C6 UART0 GPIO16 发出的固件信息帧。
+- 按 `docs/fw_info_protocol_rp2350.md` 重组多帧 Payload，解析 SDK、Plat、Board、CPU。
+- 在现有 ESP32 INFO 页显示真实信息；未接收到完整有效数据时显示用户指定文本 `Coming to soon`。
+
+### 决策
+
+1. UART RX 在关闭 CDC 时也必须始终运行，统一入口同时承担固件解析和可选 CDC 转发。
+2. 使用 `0x46 0x49` 滑动同步、XOR、flag、连续 seq、200ms 超时和 256 字节边界检查。
+3. 四个必需字段齐全后才发布；无效新序列不清除上一份有效信息。
+4. Core0 完整解析后通过版本化跨核快照供 Core1 OLED 使用，不写 Flash。
+5. Board 在 OLED 上占两行，每行最多 21 字符；不改变 INFO 页导航。
+6. 不主动复位 ESP32、不增加请求重发协议；漏接启动帧时保持 `Coming to soon`。
+7. 按仓库约定不运行编译，由用户完成构建和实机验证。
+
+### 讨论ID
+
+`2026-07-13-esp32-firmware-info-uart`
+
+### 实现记录
+
+- `FightpadESP32ProxyAddon::process()` 现在无论 CDC 是否启用都会读取 UART RX；启用 CDC 时仍保留收到字节的转发副本。
+- 新增 `0x46 0x49` 滑动同步器、8 字节 XOR 校验、FIRST/MIDDLE/LAST/SINGLE、连续 seq、200ms 超时和 256 字节 Payload 边界处理。
+- Payload 只在 SDK、Plat、Board、CPU 四个字段全部有效时发布；坏帧或无效新序列不会清除上一份有效数据。
+- Core0/Core1 共享信息使用 Pico critical section 和版本号保护完整结构快照。
+- ESP32 INFO 页显示标题、SDK、Plat、两行 Board、CPU 和 Back；无有效数据时显示 `Coming to soon`。
+- 协议示例静态生成结果为 66 字节、17 帧，FIRST=`0xC0`、LAST=`0x50`，全部 XOR 通过，Board 可在两行内显示。
+- `git diff --check` 通过；按仓库约定未编译，S13-D 等待用户构建和实机验证。
+
+## 2026-07-13: Key Effect Gradient 规划与实现 (S14)
+
+### 需求
+
+- 在 `RGB Custom -> Key Effect` 中增加 Base Effect 已有的 `Gradient`。
+- GP22 的 12 颗按键灯显示相同的动态色轮颜色。
+- 保留按键 Key Flash 覆盖和重启后的效果持久化。
+
+### 决策
+
+1. Key Gradient 使用新效果编号 `6`，不改变已有 Key 效果编号。
+2. Key Gradient 使用独立的色轮位置和反向状态，避免与 Base 动态效果相互改变速度。
+3. 算法与 Base Gradient 一致：`RGB::wheel()`、固定亮度 `0.5f`、每帧步进 `2`、边界往返。
+4. Gradient 忽略但不清空已保存的 Static Color，切回 Static Color 后恢复原颜色。
+5. 每颗灯继续检查 `gp22FlashUntil`，Key Flash 有效时优先显示 Flash 颜色。
+6. 按仓库约定不运行编译，由用户完成构建和实机验证。
+
+### 讨论ID
+
+`2026-07-13-key-effect-gradient`
+
+### 实现记录
+
+- `kMenuButtonEffects` 在 Static Color 后增加 `Gradient`，目标效果编号为 `6`。
+- `FightpadAmbientLEDAddon::renderButtons()` 新增 Key Gradient 分支。
+- 新增 `buttonGradientFrame` / `buttonGradientReverse`，与 Base 的共享色轮状态隔离。
+- `FightpadAmbientLEDOptions.buttonEffectIndex` 注释范围更新为 `0-6`；字段和持久化路径不变。
+- `git diff --check` 和定向源代码检查通过；按仓库约定未编译，S14-D 等待用户构建和实机验证。

@@ -42,6 +42,26 @@
 - 功能: Key Effect 删除 Static Theme，Key/Base 的 Breathing 都进入颜色菜单做单色呼吸或 OFF；Base Effect 删除自动变色 Breathing，Static Theme 改名 Rainbow
 - 讨论ID: `2026-07-09-rgb-effect-menu-trim`
 
+### BQ27220 电量 SOC/FCC 稳定性
+- 物理硬件: BQ27220 电量计 (GP25=SCL, GP26=SDA, GP27=GPOUT)，BQ27220 直接电池供电
+- 功能: 审计 BQ27220 配置写入与 FCC/SOC 跳变，使用现有 OLED 诊断页人工复测低电重启与 FCC 恢复现象
+- 讨论ID: `2026-07-09-bq27220-battery-soc-fcc-stability`
+
+### RP2350B 固件信息菜单
+- 物理硬件: RP2350B 主控与现有 128x64 OLED，无新增引脚
+- 功能: 在拨轮菜单的 RP2350B INFO 页显示 Pico SDK 版本、平台、板级配置和 CPU 架构
+- 讨论ID: `2026-07-10-rp2350-firmware-info-menu`
+
+### ESP32-C6 固件信息串口接收与菜单显示
+- 物理硬件: RP2350B UART0 GP44/GP45 与 ESP32-C6 UART0 GPIO17/GPIO16，115200 8N1
+- 功能: 接收 ESP32-C6 多帧固件信息，解析 SDK/Plat/Board/CPU，并在 ESP32 INFO 页显示；无数据时显示 `Coming to soon`
+- 讨论ID: `2026-07-13-esp32-firmware-info-uart`
+
+### Key Effect Gradient
+- 物理硬件: 无新增硬件，复用 GP22 的 12 颗按键 WS2812 LED 链
+- 功能: 在 RGB Custom 的 Key Effect 菜单增加 Gradient，使用独立色轮状态实现全按键同步变色并保留 Key Flash
+- 讨论ID: `2026-07-13-key-effect-gradient`
+
 ## 开发步骤状态
 
 | 步骤 | 描述 | 状态 | 讨论ID |
@@ -70,3 +90,18 @@
 | S10-A | Key Effect删除Static Theme并将Breathing改为单色呼吸颜色菜单 | completed | 2026-07-09-rgb-effect-menu-trim |
 | S10-B | Base Effect删除自动变色Breathing并将Static Theme改名Rainbow | completed | 2026-07-09-rgb-effect-menu-trim |
 | S10-C | Key/Base菜单项与选色行为实机验证 | pending | 2026-07-09-rgb-effect-menu-trim |
+| S11-A | BQ27220配置写入行为审计 | completed | 2026-07-09-bq27220-battery-soc-fcc-stability |
+| S11-B | BQ27220诊断读取补强 | completed | 2026-07-09-bq27220-battery-soc-fcc-stability |
+| S11-C | SOC/FCC跳变实机复测 | pending | 2026-07-09-bq27220-battery-soc-fcc-stability |
+| S11-D | 低电灯效侧降耗策略评估 | pending | 2026-07-09-bq27220-battery-soc-fcc-stability |
+| S12-A | RP2350B固件信息菜单页 | completed | 2026-07-10-rp2350-firmware-info-menu |
+| S12-B | 固件信息页静态检查 | completed | 2026-07-10-rp2350-firmware-info-menu |
+| S12-C | 固件信息页实机验证 | pending | 2026-07-10-rp2350-firmware-info-menu |
+| S13-A | UART RX与固件信息帧状态机 | completed | 2026-07-13-esp32-firmware-info-uart |
+| S13-B | Payload解析与跨核快照 | completed | 2026-07-13-esp32-firmware-info-uart |
+| S13-C | ESP32固件信息菜单页 | completed | 2026-07-13-esp32-firmware-info-uart |
+| S13-D | 固件信息静态与实机验证 | pending | 2026-07-13-esp32-firmware-info-uart |
+| S14-A | Key Effect菜单增加Gradient并保持效果编号兼容 | completed | 2026-07-13-key-effect-gradient |
+| S14-B | GP22 Key Gradient独立动画状态与Key Flash覆盖 | completed | 2026-07-13-key-effect-gradient |
+| S14-C | Key Gradient代码静态验证 | completed | 2026-07-13-key-effect-gradient |
+| S14-D | Key Gradient菜单与灯效实机验证 | pending | 2026-07-13-key-effect-gradient |
