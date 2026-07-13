@@ -1,0 +1,5 @@
+-- git rev-parse returned 'fatal: not a git repository (or any of the parent directories): .git'
+-- Could not use 'git describe' to determine PROJECT_VER.
+-- Building ESP-IDF components for target esp32c6
+-- Configuring incomplete, errors occurred!
+See also "/home/book/esp32/esp32c6_ble_hid_gamepad_test/build/CMakeFiles/CMakeOutput.log".
