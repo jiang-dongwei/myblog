@@ -337,3 +337,38 @@ Base Effect 和 Key Effect 都需要同时提供两个呼吸灯入口：
 - 新增 `buttonGradientFrame` / `buttonGradientReverse`，与 Base 的共享色轮状态隔离。
 - `FightpadAmbientLEDOptions.buttonEffectIndex` 注释范围更新为 `0-6`；字段和持久化路径不变。
 - `git diff --check` 和定向源代码检查通过；按仓库约定未编译，S14-D 等待用户构建和实机验证。
+
+## 2026-07-13: BQ27220 启动配置回读与电流校准规划 (S15)
+
+### 需求
+
+- 启动实际回读 ITPOR、Battery ID、Battery Low、EDV0/1/2、CC Offset、Board Offset、CC Gain 和 CC Delta。
+- Battery Low 与 EDV 不一致时选择性修复，保留修复前值并二次回读。
+- 层级 0 新增 `Battery Info`，使用四页 OLED 显示运行数据、EDV配置、校准参数和充电终止状态。
+- 采样电阻为 10 mOhm，标称校准电流最终确定为 318 mA。
+
+### 决策
+
+1. Battery ID 第一轮只回读，不自动修改。
+2. 普通 RP2350 重启不得重写 Learned FCC；只有确认 BQ27220 RAM 恢复默认时才恢复 FCC 初始基线。
+3. CC Gain/CC Delta 第一轮只回读并同时显示解码值与原始 F4 字节，实测后再固化板级校准值。
+4. 318 mA 只是负载目标，校准计算必须使用外部电流表实际测量值。
+5. Battery Info 使用独立菜单层级，GP31/GP32 和 GP30 短按翻页，GP19 返回。
+6. 保持用户原有 `BUTTONS` 初始页及电池诊断显示不变；新增完整回读信息从菜单进入。
+7. 按仓库约定不运行编译，由用户完成构建和实机验证。
+
+### 讨论ID
+
+`2026-07-13-bq27220-config-readback-calibration`
+
+### 实现记录
+
+- 启动时实际回读 Battery ID、Battery Low、EDV0/1/2、CC Offset、Board Offset、CC Gain 和 CC Delta；F4 同时保存原始字节和解码值。
+- TI 公开的 BQ27220 `BatteryStatus()` 位表没有独立 ITPOR 位，固件不猜测位掩码，改用 Design Capacity/默认配置证据显示 `RAM:INIT` 或 `RAM:KEEP`。
+- Battery Low、EDV0/1/2 和受控 CEDV 位按差异选择性修复，并保存修复前、目标和修复后二次回读结果。
+- 完整 RAM 初始化仍只在默认恢复证据成立时执行；普通 RP2350 重启不写 learned FCC。
+- 层级 0 新增 `Battery Info`，四页显示运行数据、配置检查、CC 校准数据和充电终止状态；用户原有 `BUTTONS` 初始页保持不变。
+- 充电终止目标改为 `Taper Current=200mA`、`Taper Voltage=50mV`；启动实际回读 Charging Voltage、Taper Current、Taper Voltage 和 SOC Flag Config A，仅在不一致时使用 `EXIT_CFG_UPDATE(0x0092)` 局部修复，不重置 learned FCC 或 CC 校准值。
+- 第四页显示充电参数实际回读、瞬时 Current、`AverageCurrent(0x14)` 和 BatteryStatus 的 FC/TCA，用真实平均电流验证Taper窗口。
+- Fightpad12Slim 板级采样电阻记录为 10 mOhm，校准负载记录为 318 mA，当前保持 `CAL:UNCAL`，等待至少 5 组外部电流表/BQ 实测数据后再计算并写入 CC Gain/CC Delta。
+- `git diff --check` 和定向源码审计通过；按仓库约定未运行编译，S15-D 等待用户构建和实机采样。

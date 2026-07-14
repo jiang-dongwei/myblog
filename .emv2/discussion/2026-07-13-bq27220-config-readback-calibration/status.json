@@ -1,0 +1,20 @@
+{
+  "discussion_id": "2026-07-13-bq27220-config-readback-calibration",
+  "created_at": "2026-07-13",
+  "current_phase": 5,
+  "phases": {
+    "split": "completed",
+    "requirements": "completed",
+    "hardware": "completed",
+    "brainstorm": "completed",
+    "milestones": "completed"
+  },
+  "subsystems": [
+    "BQ27220 启动配置回读",
+    "配置差异选择性修复",
+    "Battery Info OLED 菜单",
+    "CC Gain/CC Delta 校准",
+    "SOC/FCC 回归验证"
+  ],
+  "current_subsystem": 0
+}

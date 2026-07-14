@@ -102,6 +102,18 @@
 #define FIGHTPAD12SLIM_BQ27220_EDV2_MV 3500
 #endif
 
+#ifndef FIGHTPAD12SLIM_BQ27220_SENSE_RESISTOR_MILLIOHMS
+#define FIGHTPAD12SLIM_BQ27220_SENSE_RESISTOR_MILLIOHMS 10
+#endif
+
+#ifndef FIGHTPAD12SLIM_BQ27220_CALIBRATION_CURRENT_MA
+#define FIGHTPAD12SLIM_BQ27220_CALIBRATION_CURRENT_MA 318
+#endif
+
+#ifndef FIGHTPAD12SLIM_BQ27220_CURRENT_CALIBRATED
+#define FIGHTPAD12SLIM_BQ27220_CURRENT_CALIBRATED 0
+#endif
+
 #define FightpadBQ27220BatteryName "FightpadBQ27220Battery"
 
 static_assert(FIGHTPAD12SLIM_BQ27220_EDV_CMP == 0 || FIGHTPAD12SLIM_BQ27220_EDV_CMP == 1,
@@ -113,6 +125,51 @@ static_assert(FIGHTPAD12SLIM_BQ27220_CSYNC == 0 || FIGHTPAD12SLIM_BQ27220_CSYNC 
 
 class FightpadBQ27220BatteryAddon : public GPAddon {
 public:
+    enum class ConfigCheckResult : uint8_t {
+        NOT_CHECKED = 0,
+        OK,
+        FIXED,
+        BAD,
+    };
+
+    struct ConfigWordSnapshot {
+        bool valid;
+        uint16_t before;
+        uint16_t target;
+        uint16_t after;
+        ConfigCheckResult result;
+    };
+
+    struct ConfigurationSnapshot {
+        bool valid;
+        // The BQ27220 TRM does not expose an unambiguous ITPOR bit in the
+        // published BatteryStatus mapping.  This flag records the equivalent
+        // host decision based on RAM/default configuration evidence.
+        bool ramReinitializationRequired;
+        bool batteryIdValid;
+        uint8_t batteryId;
+        ConfigWordSnapshot chargingVoltage;
+        ConfigWordSnapshot taperCurrent;
+        ConfigWordSnapshot taperVoltage;
+        ConfigWordSnapshot socFlagConfigA;
+        ConfigWordSnapshot batteryLow;
+        ConfigWordSnapshot edv0;
+        ConfigWordSnapshot edv1;
+        ConfigWordSnapshot edv2;
+        bool ccOffsetValid;
+        int16_t ccOffset;
+        bool boardOffsetValid;
+        int8_t boardOffset;
+        bool ccGainValid;
+        uint32_t ccGainRaw;
+        uint32_t ccGainMicro;
+        bool ccDeltaValid;
+        uint32_t ccDeltaRaw;
+        uint32_t ccDeltaRounded;
+        bool currentCalibrated;
+        ConfigCheckResult overallResult;
+    };
+
     enum class ReadStatus : uint8_t {
         NOT_STARTED = 0,
         OK,
@@ -125,6 +182,8 @@ public:
         CONFIG_FULL_ACCESS_FAILED,
         CONFIG_VERIFY_FAILED,
         CONFIG_VERIFY_TAPER_FAILED,
+        CONFIG_VERIFY_TAPER_VOLTAGE_FAILED,
+        CONFIG_VERIFY_SOC_FLAG_FAILED,
         CONFIG_VERIFY_FCC_FAILED,
         CONFIG_VERIFY_DESIGN_CAPACITY_FAILED,
         CONFIG_VERIFY_DESIGN_VOLTAGE_FAILED,
@@ -151,8 +210,17 @@ public:
     static uint16_t getBatteryVoltageMillivolts();
     static bool isBatteryCurrentValid();
     static int16_t getBatteryCurrentMilliamps();
+    static bool isBatteryAverageCurrentValid();
+    static int16_t getBatteryAverageCurrentMilliamps();
+    static bool isBatteryStatusValid();
+    static uint16_t getBatteryStatus();
+    static bool isBatteryFullChargeDetected();
+    static bool isBatteryTerminateChargeAlarm();
+    static bool isBatteryRemainingCapacityValid();
+    static uint16_t getBatteryRemainingCapacityMah();
     static bool isBatteryFullChargeCapacityValid();
     static uint16_t getBatteryFullChargeCapacityMah();
+    static bool getConfigurationSnapshot(ConfigurationSnapshot& snapshot);
     static ReadStatus getReadStatus();
     static bool isBatterySecurityStatusValid();
     static char getBatterySecurityStatusCode();
@@ -178,7 +246,10 @@ private:
     bool readOperationStatus(uint8_t& statusLow, uint8_t& statusHigh);
     bool writeControlWord(uint16_t command);
     bool writeManufacturerAccessWord(uint16_t command);
+    bool readDataMemoryBytes(uint16_t address, uint8_t* data, uint8_t length);
     bool readDataMemoryWord(uint16_t address, uint16_t& value);
+    bool readConfigurationSnapshot(bool afterRepair);
+    void finalizeConfigurationSnapshot();
     bool updateDataMemoryWordBits(uint16_t address, uint16_t clearMask, uint16_t setMask, ReadStatus verifyFailureStatus);
     bool writeDataMemoryWord(uint16_t address, uint16_t value, ReadStatus verifyFailureStatus);
     bool readRegisterBytes(uint8_t command, uint8_t* data, uint8_t length);
@@ -186,6 +257,9 @@ private:
     bool readStateOfCharge(uint8_t& percent);
     bool readVoltage(uint16_t& millivolts);
     bool readCurrent(int16_t& milliamps);
+    bool readAverageCurrent(int16_t& milliamps);
+    bool readBatteryStatus(uint16_t& status);
+    bool readRemainingCapacity(uint16_t& capacityMah);
     bool readFullChargeCapacity(uint16_t& capacityMah);
     uint8_t percentToBars(uint8_t percent) const;
     bool readWord(uint8_t command, uint16_t& value);
@@ -201,6 +275,7 @@ private:
     bool pinsConfigured = false;
     bool batteryConfigAttempted = false;
     bool batteryConfigApplied = false;
+    bool cedvConfigNeedsRepair = false;
     uint32_t nextPollTimeMs = 0;
 };
 

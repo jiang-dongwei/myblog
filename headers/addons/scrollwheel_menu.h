@@ -48,7 +48,7 @@
 // ── Menu tree definition (shared between Core0 nav and Core1 render) ─────
 
 enum class SWMenuLevel : uint8_t {
-    MAIN          = 0,  // Level 0: RP2350, ESP32C6, RGB Customize
+    MAIN          = 0,  // Level 0: RP2350, ESP32C6, Battery Info, RGB Customize
     RGB_SUB       = 1,  // Level 1: Button, ButtonEffect, AmbientEffect, OFF
     COLOR         = 2,  // Level 2: color names (Button RGB flash)
     INFO          = 3,  // Info pages (RP2350/ESP32C6)
@@ -58,7 +58,10 @@ enum class SWMenuLevel : uint8_t {
     COLOR_AMB     = 7,  // Level 3: color picker under Ambient LED Effect -> Static Color
     COLOR_BTN_BREATH = 8, // Level 3: color picker under Button LED Effect -> Breathing
     COLOR_AMB_BREATH = 9, // Level 3: color picker under Ambient LED Effect -> Breathing
+    BATTERY_INFO  = 10, // Battery runtime/config/calibration/charge pages
 };
+
+static constexpr uint8_t SW_BATTERY_PAGE_COUNT = 4;
 
 struct SWMenuItem {
     const char* label;

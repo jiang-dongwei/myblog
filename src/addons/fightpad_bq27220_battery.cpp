@@ -2,13 +2,18 @@
 
 #include "pico/stdlib.h"
 
+#include <cmath>
+
 namespace
 {
     static constexpr uint8_t BQ27220_I2C_ADDRESS = 0x55;
     static constexpr uint8_t BQ27220_COMMAND_CONTROL = 0x00;
     static constexpr uint8_t BQ27220_COMMAND_VOLTAGE = 0x08;
+    static constexpr uint8_t BQ27220_COMMAND_BATTERY_STATUS = 0x0A;
     static constexpr uint8_t BQ27220_COMMAND_CURRENT = 0x0C;
+    static constexpr uint8_t BQ27220_COMMAND_REMAINING_CAPACITY = 0x10;
     static constexpr uint8_t BQ27220_COMMAND_FULL_CHARGE_CAPACITY = 0x12;
+    static constexpr uint8_t BQ27220_COMMAND_AVERAGE_CURRENT = 0x14;
     static constexpr uint8_t BQ27220_COMMAND_STATE_OF_CHARGE = 0x2C;
     static constexpr uint8_t BQ27220_COMMAND_DESIGN_CAPACITY = 0x3C;
     static constexpr uint8_t BQ27220_COMMAND_OPERATION_STATUS = 0x3A;
@@ -25,10 +30,15 @@ namespace
     static constexpr uint16_t BQ27220_CONTROL_ENTER_CONFIG_UPDATE = 0x0090;
     static constexpr uint16_t BQ27220_CONTROL_EXIT_CONFIG_UPDATE_REINIT = 0x0091;
     static constexpr uint16_t BQ27220_CONTROL_EXIT_CONFIG_UPDATE = 0x0092;
+    static constexpr uint16_t BQ27220_DATA_CC_OFFSET = 0x9180;
+    static constexpr uint16_t BQ27220_DATA_CC_GAIN = 0x9184;
+    static constexpr uint16_t BQ27220_DATA_CC_DELTA = 0x9188;
+    static constexpr uint16_t BQ27220_DATA_BOARD_OFFSET = 0x91B4;
     static constexpr uint16_t BQ27220_DATA_CHARGING_VOLTAGE = 0x91FD;
     static constexpr uint16_t BQ27220_DATA_TAPER_CURRENT = 0x9201;
     static constexpr uint16_t BQ27220_DATA_BATTERY_LOW_PERCENT = 0x9251;
     static constexpr uint16_t BQ27220_DATA_SOC_FLAG_CONFIG_A = 0x927F;
+    static constexpr uint16_t BQ27220_DATA_BATTERY_ID = 0x929A;
     static constexpr uint16_t BQ27220_DATA_CEDV_GAUGING_CONFIG = 0x929B;
     static constexpr uint16_t BQ27220_DATA_FULL_CHARGE_CAPACITY = 0x929D;
     static constexpr uint16_t BQ27220_DATA_DESIGN_CAPACITY = 0x929F;
@@ -45,6 +55,8 @@ namespace
     static constexpr uint16_t BQ27220_CEDV_MANAGED_MASK =
         BQ27220_CEDV_SC_MASK | BQ27220_CEDV_EDV_CMP_MASK | BQ27220_CEDV_CSYNC_MASK;
     static constexpr uint16_t BQ27220_SOC_FLAG_PRIMARY_TERMINATION_MASK = 0x0C00;
+    static constexpr uint16_t BQ27220_BATTERY_STATUS_FC_MASK = 0x0200;
+    static constexpr uint16_t BQ27220_BATTERY_STATUS_TCA_MASK = 0x0040;
     static constexpr uint8_t BQ27220_OPERATION_STATUS_CFGUPDATE_MASK = 0x04;
     static constexpr uint8_t BQ27220_SHORT_MAC_DATA_LENGTH = 0x06;
     static constexpr uint16_t I2C_SCL_HIGH_TIMEOUT_US = 10000;
@@ -57,6 +69,12 @@ namespace
     uint16_t batteryVoltageMillivolts = 0;
     bool batteryCurrentValid = false;
     int16_t batteryCurrentMilliamps = 0;
+    bool batteryAverageCurrentValid = false;
+    int16_t batteryAverageCurrentMilliamps = 0;
+    bool batteryStatusValid = false;
+    uint16_t batteryStatus = 0;
+    bool batteryRemainingCapacityValid = false;
+    uint16_t batteryRemainingCapacityMah = 0;
     bool batteryFullChargeCapacityValid = false;
     uint16_t batteryFullChargeCapacityMah = 0;
     FightpadBQ27220BatteryAddon::ReadStatus batteryReadStatus = FightpadBQ27220BatteryAddon::ReadStatus::NOT_STARTED;
@@ -70,6 +88,27 @@ namespace
     uint8_t batteryDataMemoryDebugOldChecksum = 0;
     uint8_t batteryDataMemoryDebugNewChecksum = 0;
     uint8_t batteryDataMemoryDebugLength = 0;
+    FightpadBQ27220BatteryAddon::ConfigurationSnapshot batteryConfigurationSnapshot = {};
+
+    bool decodeXemicsF4(const uint8_t bytes[4], double& value)
+    {
+        const int exponent = static_cast<int>(bytes[0]) - 128;
+        const int sign = (bytes[1] & 0x80) ? -1 : 1;
+        const uint32_t mantissa = 0x800000u |
+            (static_cast<uint32_t>(bytes[1] & 0x7F) << 16) |
+            (static_cast<uint32_t>(bytes[2]) << 8) |
+            static_cast<uint32_t>(bytes[3]);
+        value = static_cast<double>(sign) * std::ldexp(static_cast<double>(mantissa), exponent - 24);
+        return std::isfinite(value);
+    }
+
+    uint32_t bytesToU32(const uint8_t bytes[4])
+    {
+        return (static_cast<uint32_t>(bytes[0]) << 24) |
+            (static_cast<uint32_t>(bytes[1]) << 16) |
+            (static_cast<uint32_t>(bytes[2]) << 8) |
+            static_cast<uint32_t>(bytes[3]);
+    }
     bool timeReached(uint32_t now, uint32_t target)
     {
         return static_cast<int32_t>(now - target) >= 0;
@@ -80,6 +119,8 @@ namespace
         switch (status) {
             case FightpadBQ27220BatteryAddon::ReadStatus::CONFIG_VERIFY_FAILED:
             case FightpadBQ27220BatteryAddon::ReadStatus::CONFIG_VERIFY_TAPER_FAILED:
+            case FightpadBQ27220BatteryAddon::ReadStatus::CONFIG_VERIFY_TAPER_VOLTAGE_FAILED:
+            case FightpadBQ27220BatteryAddon::ReadStatus::CONFIG_VERIFY_SOC_FLAG_FAILED:
             case FightpadBQ27220BatteryAddon::ReadStatus::CONFIG_VERIFY_FCC_FAILED:
             case FightpadBQ27220BatteryAddon::ReadStatus::CONFIG_VERIFY_DESIGN_CAPACITY_FAILED:
             case FightpadBQ27220BatteryAddon::ReadStatus::CONFIG_VERIFY_DESIGN_VOLTAGE_FAILED:
@@ -112,10 +153,17 @@ void FightpadBQ27220BatteryAddon::setup()
     batteryVoltageMillivolts = 0;
     batteryCurrentValid = false;
     batteryCurrentMilliamps = 0;
+    batteryAverageCurrentValid = false;
+    batteryAverageCurrentMilliamps = 0;
+    batteryStatusValid = false;
+    batteryStatus = 0;
+    batteryRemainingCapacityValid = false;
+    batteryRemainingCapacityMah = 0;
     batteryFullChargeCapacityValid = false;
     batteryFullChargeCapacityMah = 0;
     batteryConfigAttempted = false;
     batteryConfigApplied = false;
+    cedvConfigNeedsRepair = false;
     batteryReadStatus = ReadStatus::NOT_STARTED;
     batterySecurityStatusValid = false;
     batterySecurityStatusBits = 0;
@@ -127,6 +175,7 @@ void FightpadBQ27220BatteryAddon::setup()
     batteryDataMemoryDebugOldChecksum = 0;
     batteryDataMemoryDebugNewChecksum = 0;
     batteryDataMemoryDebugLength = 0;
+    batteryConfigurationSnapshot = {};
     nextPollTimeMs = getMillis() + FIGHTPAD12SLIM_BQ27220_BOOT_DELAY_MS;
 
     if (FIGHTPAD12SLIM_BQ27220_GPOUT_PIN >= 0) {
@@ -161,6 +210,9 @@ void FightpadBQ27220BatteryAddon::process()
     batteryPercentValid = false;
     batteryVoltageValid = false;
     batteryCurrentValid = false;
+    batteryAverageCurrentValid = false;
+    batteryStatusValid = false;
+    batteryRemainingCapacityValid = false;
     batteryFullChargeCapacityValid = false;
 
     uint8_t percent = 0;
@@ -184,13 +236,33 @@ void FightpadBQ27220BatteryAddon::process()
         batteryCurrentValid = true;
     }
 
+    int16_t averageMilliamps = 0;
+    if (readAverageCurrent(averageMilliamps)) {
+        batteryAverageCurrentMilliamps = averageMilliamps;
+        batteryAverageCurrentValid = true;
+    }
+
+    uint16_t status = 0;
+    if (readBatteryStatus(status)) {
+        batteryStatus = status;
+        batteryStatusValid = true;
+    }
+
+    uint16_t remainingCapacityMah = 0;
+    if (readRemainingCapacity(remainingCapacityMah)) {
+        batteryRemainingCapacityMah = remainingCapacityMah;
+        batteryRemainingCapacityValid = true;
+    }
+
     uint16_t capacityMah = 0;
     if (readFullChargeCapacity(capacityMah)) {
         batteryFullChargeCapacityMah = capacityMah;
         batteryFullChargeCapacityValid = true;
     }
 
-    if (batteryPercentValid && batteryVoltageValid && batteryCurrentValid && batteryFullChargeCapacityValid) {
+    if (batteryPercentValid && batteryVoltageValid && batteryCurrentValid &&
+        batteryAverageCurrentValid && batteryStatusValid &&
+        batteryRemainingCapacityValid && batteryFullChargeCapacityValid) {
 #if FIGHTPAD12SLIM_BQ27220_CONFIGURE_RAM
         if (batteryConfigApplied) {
             batteryReadStatus = ReadStatus::OK;
@@ -238,6 +310,46 @@ int16_t FightpadBQ27220BatteryAddon::getBatteryCurrentMilliamps()
     return batteryCurrentMilliamps;
 }
 
+bool FightpadBQ27220BatteryAddon::isBatteryAverageCurrentValid()
+{
+    return batteryAverageCurrentValid;
+}
+
+int16_t FightpadBQ27220BatteryAddon::getBatteryAverageCurrentMilliamps()
+{
+    return batteryAverageCurrentMilliamps;
+}
+
+bool FightpadBQ27220BatteryAddon::isBatteryStatusValid()
+{
+    return batteryStatusValid;
+}
+
+uint16_t FightpadBQ27220BatteryAddon::getBatteryStatus()
+{
+    return batteryStatus;
+}
+
+bool FightpadBQ27220BatteryAddon::isBatteryFullChargeDetected()
+{
+    return batteryStatusValid && (batteryStatus & BQ27220_BATTERY_STATUS_FC_MASK) != 0;
+}
+
+bool FightpadBQ27220BatteryAddon::isBatteryTerminateChargeAlarm()
+{
+    return batteryStatusValid && (batteryStatus & BQ27220_BATTERY_STATUS_TCA_MASK) != 0;
+}
+
+bool FightpadBQ27220BatteryAddon::isBatteryRemainingCapacityValid()
+{
+    return batteryRemainingCapacityValid;
+}
+
+uint16_t FightpadBQ27220BatteryAddon::getBatteryRemainingCapacityMah()
+{
+    return batteryRemainingCapacityMah;
+}
+
 bool FightpadBQ27220BatteryAddon::isBatteryFullChargeCapacityValid()
 {
     return batteryFullChargeCapacityValid;
@@ -246,6 +358,12 @@ bool FightpadBQ27220BatteryAddon::isBatteryFullChargeCapacityValid()
 uint16_t FightpadBQ27220BatteryAddon::getBatteryFullChargeCapacityMah()
 {
     return batteryFullChargeCapacityMah;
+}
+
+bool FightpadBQ27220BatteryAddon::getConfigurationSnapshot(ConfigurationSnapshot& snapshot)
+{
+    snapshot = batteryConfigurationSnapshot;
+    return snapshot.valid;
 }
 
 FightpadBQ27220BatteryAddon::ReadStatus FightpadBQ27220BatteryAddon::getReadStatus()
@@ -343,8 +461,13 @@ bool FightpadBQ27220BatteryAddon::checkBatteryGaugeConfiguration(bool& configura
         return false;
     }
 
+    if (!readConfigurationSnapshot(false)) {
+        return false;
+    }
+
     uint16_t cedvConfig = 0;
     if (!readDataMemoryWord(BQ27220_DATA_CEDV_GAUGING_CONFIG, cedvConfig)) {
+        batteryConfigurationSnapshot.overallResult = ConfigCheckResult::BAD;
         return false;
     }
 
@@ -360,9 +483,22 @@ bool FightpadBQ27220BatteryAddon::checkBatteryGaugeConfiguration(bool& configura
     }
 
     requiresReinitialization = designCapacity != FIGHTPAD12SLIM_BQ27220_DESIGN_CAPACITY_MAH;
-    const bool cedvConfigCurrent =
-        (cedvConfig & BQ27220_CEDV_MANAGED_MASK) == targetCedvBits;
-    configurationCurrent = !requiresReinitialization && cedvConfigCurrent;
+    batteryConfigurationSnapshot.ramReinitializationRequired = requiresReinitialization;
+    cedvConfigNeedsRepair = (cedvConfig & BQ27220_CEDV_MANAGED_MASK) != targetCedvBits;
+
+    const bool dataMemoryCurrent =
+        batteryConfigurationSnapshot.chargingVoltage.before == batteryConfigurationSnapshot.chargingVoltage.target &&
+        batteryConfigurationSnapshot.taperCurrent.before == batteryConfigurationSnapshot.taperCurrent.target &&
+        batteryConfigurationSnapshot.taperVoltage.before == batteryConfigurationSnapshot.taperVoltage.target &&
+        batteryConfigurationSnapshot.socFlagConfigA.before == batteryConfigurationSnapshot.socFlagConfigA.target &&
+        batteryConfigurationSnapshot.batteryLow.before == batteryConfigurationSnapshot.batteryLow.target &&
+        batteryConfigurationSnapshot.edv0.before == batteryConfigurationSnapshot.edv0.target &&
+        batteryConfigurationSnapshot.edv1.before == batteryConfigurationSnapshot.edv1.target &&
+        batteryConfigurationSnapshot.edv2.before == batteryConfigurationSnapshot.edv2.target;
+    configurationCurrent = !requiresReinitialization && !cedvConfigNeedsRepair && dataMemoryCurrent;
+    if (configurationCurrent) {
+        finalizeConfigurationSnapshot();
+    }
     return true;
 #endif
 }
@@ -372,28 +508,35 @@ bool FightpadBQ27220BatteryAddon::configureBatteryGauge(bool reinitialize)
 #if !FIGHTPAD12SLIM_BQ27220_CONFIGURE_RAM
     return true;
 #else
+    bool configEntryCommandSent = false;
     bool enteredConfig = false;
     bool ok = enterFullAccessMode();
-    ok = ok && writeControlWord(BQ27220_CONTROL_ENTER_CONFIG_UPDATE);
+    if (ok) {
+        configEntryCommandSent = writeControlWord(BQ27220_CONTROL_ENTER_CONFIG_UPDATE);
+        ok = configEntryCommandSent;
+    }
 
     if (ok) {
         enteredConfig = waitForConfigUpdateMode(true);
         ok = enteredConfig;
     }
 
-    if (ok) {
+    if (ok && (reinitialize ||
+        batteryConfigurationSnapshot.chargingVoltage.before != batteryConfigurationSnapshot.chargingVoltage.target)) {
         ok = writeDataMemoryWord(BQ27220_DATA_CHARGING_VOLTAGE, FIGHTPAD12SLIM_BQ27220_BATTERY_MAX_VOLTAGE_MV, ReadStatus::CONFIG_VERIFY_CHARGING_VOLTAGE_FAILED);
     }
-    if (ok) {
+    if (ok && (reinitialize ||
+        batteryConfigurationSnapshot.taperCurrent.before != batteryConfigurationSnapshot.taperCurrent.target)) {
         ok = writeDataMemoryWord(BQ27220_DATA_TAPER_CURRENT, FIGHTPAD12SLIM_BQ27220_TAPER_CURRENT_MA, ReadStatus::CONFIG_VERIFY_TAPER_FAILED);
     }
-    if (ok) {
-        ok = writeDataMemoryWord(BQ27220_DATA_TAPER_VOLTAGE, FIGHTPAD12SLIM_BQ27220_TAPER_VOLTAGE_MV, ReadStatus::CONFIG_VERIFY_FAILED);
+    if (ok && (reinitialize ||
+        batteryConfigurationSnapshot.taperVoltage.before != batteryConfigurationSnapshot.taperVoltage.target)) {
+        ok = writeDataMemoryWord(BQ27220_DATA_TAPER_VOLTAGE, FIGHTPAD12SLIM_BQ27220_TAPER_VOLTAGE_MV, ReadStatus::CONFIG_VERIFY_TAPER_VOLTAGE_FAILED);
     }
-    if (ok) {
+    if (ok && (reinitialize || batteryConfigurationSnapshot.batteryLow.before != batteryConfigurationSnapshot.batteryLow.target)) {
         ok = writeDataMemoryWord(BQ27220_DATA_BATTERY_LOW_PERCENT, FIGHTPAD12SLIM_BQ27220_BATTERY_LOW_PERCENT_X100, ReadStatus::CONFIG_VERIFY_FAILED);
     }
-    if (ok) {
+    if (ok && (reinitialize || cedvConfigNeedsRepair)) {
         uint16_t cedvBits = 0;
         if (FIGHTPAD12SLIM_BQ27220_INDEPENDENT_CHARGER) {
             cedvBits |= BQ27220_CEDV_SC_MASK;
@@ -406,37 +549,40 @@ bool FightpadBQ27220BatteryAddon::configureBatteryGauge(bool reinitialize)
         }
         ok = updateDataMemoryWordBits(BQ27220_DATA_CEDV_GAUGING_CONFIG, BQ27220_CEDV_MANAGED_MASK, cedvBits, ReadStatus::CONFIG_VERIFY_FAILED);
     }
-    if (ok) {
-        ok = updateDataMemoryWordBits(BQ27220_DATA_SOC_FLAG_CONFIG_A, 0, BQ27220_SOC_FLAG_PRIMARY_TERMINATION_MASK, ReadStatus::CONFIG_VERIFY_FAILED);
+    if (ok && (reinitialize ||
+        batteryConfigurationSnapshot.socFlagConfigA.before != batteryConfigurationSnapshot.socFlagConfigA.target)) {
+        ok = updateDataMemoryWordBits(BQ27220_DATA_SOC_FLAG_CONFIG_A, 0, BQ27220_SOC_FLAG_PRIMARY_TERMINATION_MASK, ReadStatus::CONFIG_VERIFY_SOC_FLAG_FAILED);
     }
     // Restore the FCC baseline only after the gauge RAM has returned to defaults.
     if (ok && reinitialize) {
         ok = writeDataMemoryWord(BQ27220_DATA_FULL_CHARGE_CAPACITY, FIGHTPAD12SLIM_BQ27220_DESIGN_CAPACITY_MAH, ReadStatus::CONFIG_VERIFY_FCC_FAILED);
     }
-    if (ok) {
+    if (ok && reinitialize) {
         ok = writeDataMemoryWord(BQ27220_DATA_DESIGN_CAPACITY, FIGHTPAD12SLIM_BQ27220_DESIGN_CAPACITY_MAH, ReadStatus::CONFIG_VERIFY_DESIGN_CAPACITY_FAILED);
     }
-    if (ok) {
+    if (ok && reinitialize) {
         ok = writeDataMemoryWord(BQ27220_DATA_DESIGN_VOLTAGE, FIGHTPAD12SLIM_BQ27220_DESIGN_VOLTAGE_MV, ReadStatus::CONFIG_VERIFY_DESIGN_VOLTAGE_FAILED);
     }
-    if (ok) {
+    if (ok && (reinitialize || batteryConfigurationSnapshot.edv0.before != batteryConfigurationSnapshot.edv0.target)) {
         ok = writeDataMemoryWord(BQ27220_DATA_FIXED_EDV0, FIGHTPAD12SLIM_BQ27220_EDV0_MV, ReadStatus::CONFIG_VERIFY_EDV0_FAILED);
     }
-    if (ok) {
+    if (ok && (reinitialize || batteryConfigurationSnapshot.edv1.before != batteryConfigurationSnapshot.edv1.target)) {
         ok = writeDataMemoryWord(BQ27220_DATA_FIXED_EDV1, FIGHTPAD12SLIM_BQ27220_EDV1_MV, ReadStatus::CONFIG_VERIFY_EDV1_FAILED);
     }
-    if (ok) {
+    if (ok && (reinitialize || batteryConfigurationSnapshot.edv2.before != batteryConfigurationSnapshot.edv2.target)) {
         ok = writeDataMemoryWord(BQ27220_DATA_FIXED_EDV2, FIGHTPAD12SLIM_BQ27220_EDV2_MV, ReadStatus::CONFIG_VERIFY_EDV2_FAILED);
     }
-    if (ok) {
+    if (ok && reinitialize) {
         ok = writeDataMemoryWord(BQ27220_DATA_VOLTAGE_0_DOD, FIGHTPAD12SLIM_BQ27220_BATTERY_MAX_VOLTAGE_MV, ReadStatus::CONFIG_VERIFY_VOLTAGE_0_DOD_FAILED);
     }
-    if (ok) {
+    if (ok && reinitialize) {
         ok = writeDataMemoryWord(BQ27220_DATA_VOLTAGE_100_DOD, FIGHTPAD12SLIM_BQ27220_BATTERY_MIN_VOLTAGE_MV, ReadStatus::CONFIG_VERIFY_VOLTAGE_100_DOD_FAILED);
     }
 
     bool exitOk = true;
-    if (enteredConfig) {
+    // Once ENTER_CFG_UPDATE was accepted, always try to leave the mode even
+    // when the status poll or a later write failed.
+    if (configEntryCommandSent) {
         const uint16_t exitCommand = reinitialize ?
             BQ27220_CONTROL_EXIT_CONFIG_UPDATE_REINIT :
             BQ27220_CONTROL_EXIT_CONFIG_UPDATE;
@@ -447,6 +593,8 @@ bool FightpadBQ27220BatteryAddon::configureBatteryGauge(bool reinitialize)
     }
 
     if (!ok || !exitOk) {
+        finalizeConfigurationSnapshot();
+        batteryConfigurationSnapshot.overallResult = ConfigCheckResult::BAD;
         if (!isConfigVerifyStatus(batteryReadStatus) &&
             batteryReadStatus != ReadStatus::CONFIG_FULL_ACCESS_FAILED) {
             batteryReadStatus = ReadStatus::CONFIG_UPDATE_FAILED;
@@ -454,7 +602,13 @@ bool FightpadBQ27220BatteryAddon::configureBatteryGauge(bool reinitialize)
         return false;
     }
 
-    return true;
+    if (!enterFullAccessMode() || !readConfigurationSnapshot(true)) {
+        finalizeConfigurationSnapshot();
+        batteryConfigurationSnapshot.overallResult = ConfigCheckResult::BAD;
+        return false;
+    }
+
+    return batteryConfigurationSnapshot.overallResult != ConfigCheckResult::BAD;
 #endif
 }
 
@@ -524,7 +678,11 @@ bool FightpadBQ27220BatteryAddon::waitForFullAccessMode()
 
 bool FightpadBQ27220BatteryAddon::waitForConfigUpdateMode(bool enabled)
 {
-    const uint32_t deadline = getMillis() + 1000;
+    // TI requires at least 2 s before checking CFGUPDATE after ENTER_CFG_UPDATE.
+    const uint32_t deadline = getMillis() + (enabled ? 3000u : 1000u);
+    if (enabled) {
+        sleep_ms(2000);
+    }
     do {
         uint8_t statusLow = 0;
         uint8_t statusHigh = 0;
@@ -577,8 +735,13 @@ bool FightpadBQ27220BatteryAddon::writeManufacturerAccessWord(uint16_t command)
     return ok;
 }
 
-bool FightpadBQ27220BatteryAddon::readDataMemoryWord(uint16_t address, uint16_t& value)
+bool FightpadBQ27220BatteryAddon::readDataMemoryBytes(uint16_t address, uint8_t* data, uint8_t length)
 {
+    if (data == nullptr || length == 0 || length > 32) {
+        batteryReadStatus = ReadStatus::VALUE_OUT_OF_RANGE;
+        return false;
+    }
+
     const uint8_t addressBytes[2] = {
         static_cast<uint8_t>(address & 0xFF),
         static_cast<uint8_t>((address >> 8) & 0xFF),
@@ -588,13 +751,190 @@ bool FightpadBQ27220BatteryAddon::readDataMemoryWord(uint16_t address, uint16_t&
     }
     sleep_ms(10);
 
+    return readRegisterBytes(BQ27220_COMMAND_BLOCK_DATA, data, length);
+}
+
+bool FightpadBQ27220BatteryAddon::readDataMemoryWord(uint16_t address, uint16_t& value)
+{
     uint8_t data[2] = {0, 0};
-    if (!readRegisterBytes(BQ27220_COMMAND_BLOCK_DATA, data, sizeof(data))) {
+    if (!readDataMemoryBytes(address, data, sizeof(data))) {
         return false;
     }
 
     value = static_cast<uint16_t>((static_cast<uint16_t>(data[0]) << 8) | data[1]);
     return true;
+}
+
+bool FightpadBQ27220BatteryAddon::readConfigurationSnapshot(bool afterRepair)
+{
+    uint8_t batteryId = 0;
+    uint16_t chargingVoltage = 0;
+    uint16_t taperCurrent = 0;
+    uint16_t taperVoltage = 0;
+    uint16_t socFlagConfigA = 0;
+    uint16_t batteryLow = 0;
+    uint16_t edv0 = 0;
+    uint16_t edv1 = 0;
+    uint16_t edv2 = 0;
+    uint16_t ccOffsetRaw = 0;
+    uint8_t boardOffsetRaw = 0;
+    uint8_t ccGainBytes[4] = {0, 0, 0, 0};
+    uint8_t ccDeltaBytes[4] = {0, 0, 0, 0};
+
+    const bool readOk =
+        readDataMemoryBytes(BQ27220_DATA_BATTERY_ID, &batteryId, 1) &&
+        readDataMemoryWord(BQ27220_DATA_CHARGING_VOLTAGE, chargingVoltage) &&
+        readDataMemoryWord(BQ27220_DATA_TAPER_CURRENT, taperCurrent) &&
+        readDataMemoryWord(BQ27220_DATA_TAPER_VOLTAGE, taperVoltage) &&
+        readDataMemoryWord(BQ27220_DATA_SOC_FLAG_CONFIG_A, socFlagConfigA) &&
+        readDataMemoryWord(BQ27220_DATA_BATTERY_LOW_PERCENT, batteryLow) &&
+        readDataMemoryWord(BQ27220_DATA_FIXED_EDV0, edv0) &&
+        readDataMemoryWord(BQ27220_DATA_FIXED_EDV1, edv1) &&
+        readDataMemoryWord(BQ27220_DATA_FIXED_EDV2, edv2) &&
+        readDataMemoryWord(BQ27220_DATA_CC_OFFSET, ccOffsetRaw) &&
+        readDataMemoryBytes(BQ27220_DATA_BOARD_OFFSET, &boardOffsetRaw, 1) &&
+        readDataMemoryBytes(BQ27220_DATA_CC_GAIN, ccGainBytes, sizeof(ccGainBytes)) &&
+        readDataMemoryBytes(BQ27220_DATA_CC_DELTA, ccDeltaBytes, sizeof(ccDeltaBytes));
+
+    if (!readOk) {
+        batteryConfigurationSnapshot.valid = true;
+        batteryConfigurationSnapshot.overallResult = ConfigCheckResult::BAD;
+        return false;
+    }
+
+    double ccGain = 0.0;
+    double ccDelta = 0.0;
+    const bool ccGainDecoded = decodeXemicsF4(ccGainBytes, ccGain) && ccGain >= 0.1 && ccGain <= 4.0;
+    const bool ccDeltaDecoded = decodeXemicsF4(ccDeltaBytes, ccDelta) && ccDelta >= 30000.0 && ccDelta <= 3000000.0;
+
+    if (!afterRepair) {
+        batteryConfigurationSnapshot = {};
+        batteryConfigurationSnapshot.currentCalibrated = FIGHTPAD12SLIM_BQ27220_CURRENT_CALIBRATED != 0;
+        batteryConfigurationSnapshot.batteryIdValid = true;
+        batteryConfigurationSnapshot.batteryId = batteryId;
+
+        batteryConfigurationSnapshot.chargingVoltage = {
+            true, chargingVoltage, FIGHTPAD12SLIM_BQ27220_BATTERY_MAX_VOLTAGE_MV, chargingVoltage,
+            ConfigCheckResult::NOT_CHECKED,
+        };
+        batteryConfigurationSnapshot.taperCurrent = {
+            true, taperCurrent, FIGHTPAD12SLIM_BQ27220_TAPER_CURRENT_MA, taperCurrent,
+            ConfigCheckResult::NOT_CHECKED,
+        };
+        batteryConfigurationSnapshot.taperVoltage = {
+            true, taperVoltage, FIGHTPAD12SLIM_BQ27220_TAPER_VOLTAGE_MV, taperVoltage,
+            ConfigCheckResult::NOT_CHECKED,
+        };
+        batteryConfigurationSnapshot.socFlagConfigA = {
+            true, socFlagConfigA,
+            static_cast<uint16_t>(socFlagConfigA | BQ27220_SOC_FLAG_PRIMARY_TERMINATION_MASK),
+            socFlagConfigA, ConfigCheckResult::NOT_CHECKED,
+        };
+
+        batteryConfigurationSnapshot.batteryLow = {
+            true, batteryLow, FIGHTPAD12SLIM_BQ27220_BATTERY_LOW_PERCENT_X100, batteryLow,
+            ConfigCheckResult::NOT_CHECKED,
+        };
+        batteryConfigurationSnapshot.edv0 = {
+            true, edv0, FIGHTPAD12SLIM_BQ27220_EDV0_MV, edv0,
+            ConfigCheckResult::NOT_CHECKED,
+        };
+        batteryConfigurationSnapshot.edv1 = {
+            true, edv1, FIGHTPAD12SLIM_BQ27220_EDV1_MV, edv1,
+            ConfigCheckResult::NOT_CHECKED,
+        };
+        batteryConfigurationSnapshot.edv2 = {
+            true, edv2, FIGHTPAD12SLIM_BQ27220_EDV2_MV, edv2,
+            ConfigCheckResult::NOT_CHECKED,
+        };
+    } else {
+        batteryConfigurationSnapshot.batteryIdValid = true;
+        batteryConfigurationSnapshot.batteryId = batteryId;
+        batteryConfigurationSnapshot.chargingVoltage.after = chargingVoltage;
+        batteryConfigurationSnapshot.taperCurrent.after = taperCurrent;
+        batteryConfigurationSnapshot.taperVoltage.after = taperVoltage;
+        batteryConfigurationSnapshot.socFlagConfigA.after = socFlagConfigA;
+        batteryConfigurationSnapshot.batteryLow.after = batteryLow;
+        batteryConfigurationSnapshot.edv0.after = edv0;
+        batteryConfigurationSnapshot.edv1.after = edv1;
+        batteryConfigurationSnapshot.edv2.after = edv2;
+    }
+
+    batteryConfigurationSnapshot.ccOffsetValid = true;
+    batteryConfigurationSnapshot.ccOffset = static_cast<int16_t>(ccOffsetRaw);
+    batteryConfigurationSnapshot.boardOffsetValid = true;
+    batteryConfigurationSnapshot.boardOffset = static_cast<int8_t>(boardOffsetRaw);
+    batteryConfigurationSnapshot.ccGainValid = ccGainDecoded;
+    batteryConfigurationSnapshot.ccGainRaw = bytesToU32(ccGainBytes);
+    batteryConfigurationSnapshot.ccGainMicro = ccGainDecoded ?
+        static_cast<uint32_t>(ccGain * 1000000.0 + 0.5) : 0;
+    batteryConfigurationSnapshot.ccDeltaValid = ccDeltaDecoded;
+    batteryConfigurationSnapshot.ccDeltaRaw = bytesToU32(ccDeltaBytes);
+    batteryConfigurationSnapshot.ccDeltaRounded = ccDeltaDecoded ?
+        static_cast<uint32_t>(ccDelta + 0.5) : 0;
+    batteryConfigurationSnapshot.valid = true;
+
+    if (afterRepair) {
+        finalizeConfigurationSnapshot();
+    }
+    return true;
+}
+
+void FightpadBQ27220BatteryAddon::finalizeConfigurationSnapshot()
+{
+    auto finalizeWord = [](ConfigWordSnapshot& word) {
+        if (!word.valid || word.after != word.target) {
+            word.result = ConfigCheckResult::BAD;
+        } else if (word.before == word.target) {
+            word.result = ConfigCheckResult::OK;
+        } else {
+            word.result = ConfigCheckResult::FIXED;
+        }
+    };
+
+    finalizeWord(batteryConfigurationSnapshot.batteryLow);
+    finalizeWord(batteryConfigurationSnapshot.chargingVoltage);
+    finalizeWord(batteryConfigurationSnapshot.taperCurrent);
+    finalizeWord(batteryConfigurationSnapshot.taperVoltage);
+    finalizeWord(batteryConfigurationSnapshot.socFlagConfigA);
+    finalizeWord(batteryConfigurationSnapshot.edv0);
+    finalizeWord(batteryConfigurationSnapshot.edv1);
+    finalizeWord(batteryConfigurationSnapshot.edv2);
+
+    const ConfigWordSnapshot* checkedWords[] = {
+        &batteryConfigurationSnapshot.chargingVoltage,
+        &batteryConfigurationSnapshot.taperCurrent,
+        &batteryConfigurationSnapshot.taperVoltage,
+        &batteryConfigurationSnapshot.socFlagConfigA,
+        &batteryConfigurationSnapshot.batteryLow,
+        &batteryConfigurationSnapshot.edv0,
+        &batteryConfigurationSnapshot.edv1,
+        &batteryConfigurationSnapshot.edv2,
+    };
+
+    ConfigCheckResult overall =
+        (batteryConfigurationSnapshot.ramReinitializationRequired || cedvConfigNeedsRepair) ?
+        ConfigCheckResult::FIXED : ConfigCheckResult::OK;
+    for (const ConfigWordSnapshot* word : checkedWords) {
+        if (word->result == ConfigCheckResult::BAD) {
+            overall = ConfigCheckResult::BAD;
+            break;
+        }
+        if (word->result == ConfigCheckResult::FIXED) {
+            overall = ConfigCheckResult::FIXED;
+        }
+    }
+
+    if (!batteryConfigurationSnapshot.batteryIdValid ||
+        !batteryConfigurationSnapshot.ccOffsetValid ||
+        !batteryConfigurationSnapshot.boardOffsetValid ||
+        !batteryConfigurationSnapshot.ccGainValid ||
+        !batteryConfigurationSnapshot.ccDeltaValid) {
+        overall = ConfigCheckResult::BAD;
+    }
+
+    batteryConfigurationSnapshot.valid = true;
+    batteryConfigurationSnapshot.overallResult = overall;
 }
 
 bool FightpadBQ27220BatteryAddon::updateDataMemoryWordBits(uint16_t address, uint16_t clearMask, uint16_t setMask, ReadStatus verifyFailureStatus)
@@ -776,6 +1116,31 @@ bool FightpadBQ27220BatteryAddon::readCurrent(int16_t& milliamps)
     }
     milliamps = static_cast<int16_t>(signedValue);
     return true;
+}
+
+bool FightpadBQ27220BatteryAddon::readBatteryStatus(uint16_t& status)
+{
+    return readWord(BQ27220_COMMAND_BATTERY_STATUS, status);
+}
+
+bool FightpadBQ27220BatteryAddon::readAverageCurrent(int16_t& milliamps)
+{
+    uint16_t value = 0;
+    if (!readWord(BQ27220_COMMAND_AVERAGE_CURRENT, value)) {
+        return false;
+    }
+
+    int32_t signedValue = value;
+    if (value & 0x8000) {
+        signedValue -= 0x10000;
+    }
+    milliamps = static_cast<int16_t>(signedValue);
+    return true;
+}
+
+bool FightpadBQ27220BatteryAddon::readRemainingCapacity(uint16_t& capacityMah)
+{
+    return readWord(BQ27220_COMMAND_REMAINING_CAPACITY, capacityMah);
 }
 
 bool FightpadBQ27220BatteryAddon::readFullChargeCapacity(uint16_t& capacityMah)

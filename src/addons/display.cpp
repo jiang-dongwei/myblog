@@ -4,6 +4,7 @@
  */
 
 #include "addons/display.h"
+#include "addons/fightpad_bq27220_battery.h"
 #include "addons/fightpad_esp32_proxy.h"
 #include "addons/scrollwheel_menu.h"
 #include "GamepadState.h"
@@ -255,6 +256,218 @@ void DisplayAddon::process() {
 
 static constexpr uint8_t SW_MAX_ROWS = 8;   // 64 px / 8 px per char row
 
+static const char* batteryConfigResultLabel(FightpadBQ27220BatteryAddon::ConfigCheckResult result) {
+    switch (result) {
+        case FightpadBQ27220BatteryAddon::ConfigCheckResult::OK:    return "OK";
+        case FightpadBQ27220BatteryAddon::ConfigCheckResult::FIXED: return "FIX";
+        case FightpadBQ27220BatteryAddon::ConfigCheckResult::BAD:   return "BAD";
+        case FightpadBQ27220BatteryAddon::ConfigCheckResult::NOT_CHECKED:
+        default:                                                    return "WAIT";
+    }
+}
+
+static void drawBatteryWordCheck(GPGFX* display, uint8_t row, const char* label,
+    const FightpadBQ27220BatteryAddon::ConfigWordSnapshot& word) {
+    char line[22] = {};
+    if (!word.valid) {
+        std::snprintf(line, sizeof(line), "%s:---- BAD", label);
+    } else if (word.result == FightpadBQ27220BatteryAddon::ConfigCheckResult::FIXED) {
+        std::snprintf(line, sizeof(line), "%s:%u>%u FIX", label,
+            static_cast<unsigned int>(word.before), static_cast<unsigned int>(word.after));
+    } else if (word.result == FightpadBQ27220BatteryAddon::ConfigCheckResult::BAD && word.before != word.target) {
+        std::snprintf(line, sizeof(line), "%s:%u/%u BAD", label,
+            static_cast<unsigned int>(word.before), static_cast<unsigned int>(word.target));
+    } else {
+        std::snprintf(line, sizeof(line), "%s:%u %s", label,
+            static_cast<unsigned int>(word.after),
+            batteryConfigResultLabel(word.result));
+    }
+    display->drawText(0, row, line);
+}
+
+static void drawBatteryHexWordCheck(GPGFX* display, uint8_t row, const char* label,
+    const FightpadBQ27220BatteryAddon::ConfigWordSnapshot& word) {
+    char line[22] = {};
+    if (!word.valid) {
+        std::snprintf(line, sizeof(line), "%s:---- BAD", label);
+    } else if (word.result == FightpadBQ27220BatteryAddon::ConfigCheckResult::FIXED) {
+        std::snprintf(line, sizeof(line), "%s:%04X>%04X FIX", label,
+            static_cast<unsigned int>(word.before), static_cast<unsigned int>(word.after));
+    } else if (word.result == FightpadBQ27220BatteryAddon::ConfigCheckResult::BAD && word.before != word.target) {
+        std::snprintf(line, sizeof(line), "%s:%04X/%04X BAD", label,
+            static_cast<unsigned int>(word.before), static_cast<unsigned int>(word.target));
+    } else {
+        std::snprintf(line, sizeof(line), "%s:%04X %s", label,
+            static_cast<unsigned int>(word.after),
+            batteryConfigResultLabel(word.result));
+    }
+    display->drawText(0, row, line);
+}
+
+static void drawBatteryRuntimePage(GPGFX* display) {
+    char line[22] = {};
+    FightpadBQ27220BatteryAddon::ConfigurationSnapshot config = {};
+    const bool configValid = FightpadBQ27220BatteryAddon::getConfigurationSnapshot(config);
+
+    display->drawText(0, 0, "Battery Info 1/4");
+    if (FightpadBQ27220BatteryAddon::isBatteryPercentValid() &&
+        FightpadBQ27220BatteryAddon::isBatteryVoltageValid()) {
+        std::snprintf(line, sizeof(line), "SOC:%03u%% V:%u",
+            static_cast<unsigned int>(FightpadBQ27220BatteryAddon::getBatteryPercent()),
+            static_cast<unsigned int>(FightpadBQ27220BatteryAddon::getBatteryVoltageMillivolts()));
+    } else {
+        std::snprintf(line, sizeof(line), "SOC:---%% V:----");
+    }
+    display->drawText(0, 1, line);
+
+    if (FightpadBQ27220BatteryAddon::isBatteryCurrentValid()) {
+        std::snprintf(line, sizeof(line), "I:%+dmA",
+            static_cast<int>(FightpadBQ27220BatteryAddon::getBatteryCurrentMilliamps()));
+    } else {
+        std::snprintf(line, sizeof(line), "I:-----mA");
+    }
+    display->drawText(0, 2, line);
+
+    if (FightpadBQ27220BatteryAddon::isBatteryRemainingCapacityValid()) {
+        std::snprintf(line, sizeof(line), "RM:%umAh",
+            static_cast<unsigned int>(FightpadBQ27220BatteryAddon::getBatteryRemainingCapacityMah()));
+    } else {
+        std::snprintf(line, sizeof(line), "RM:----mAh");
+    }
+    display->drawText(0, 3, line);
+
+    if (FightpadBQ27220BatteryAddon::isBatteryFullChargeCapacityValid()) {
+        std::snprintf(line, sizeof(line), "FCC:%umAh",
+            static_cast<unsigned int>(FightpadBQ27220BatteryAddon::getBatteryFullChargeCapacityMah()));
+    } else {
+        std::snprintf(line, sizeof(line), "FCC:----mAh");
+    }
+    display->drawText(0, 4, line);
+
+    std::snprintf(line, sizeof(line), "CFG:%s",
+        configValid ? batteryConfigResultLabel(config.overallResult) : "WAIT");
+    display->drawText(0, 5, line);
+    display->drawText(0, 6,
+        FightpadBQ27220BatteryAddon::getReadStatus() == FightpadBQ27220BatteryAddon::ReadStatus::OK ?
+        "READ:OK" : "READ:ERR");
+    display->drawText(0, 7, "< page >");
+}
+
+static void drawBatteryConfigPage(GPGFX* display) {
+    char line[22] = {};
+    FightpadBQ27220BatteryAddon::ConfigurationSnapshot config = {};
+    display->drawText(0, 0, "BQ CONFIG 2/4");
+
+    if (!FightpadBQ27220BatteryAddon::getConfigurationSnapshot(config)) {
+        display->drawText(0, 2, "Config read pending");
+        display->drawText(0, 7, "< page >");
+        return;
+    }
+
+    if (config.batteryIdValid) {
+        std::snprintf(line, sizeof(line), "ID:%02X RAM:%s",
+            static_cast<unsigned int>(config.batteryId),
+            config.ramReinitializationRequired ? "INIT" : "KEEP");
+    } else {
+        std::snprintf(line, sizeof(line), "ID:-- RAM:?");
+    }
+    display->drawText(0, 1, line);
+    drawBatteryWordCheck(display, 2, "LOW", config.batteryLow);
+    drawBatteryWordCheck(display, 3, "E0", config.edv0);
+    drawBatteryWordCheck(display, 4, "E1", config.edv1);
+    drawBatteryWordCheck(display, 5, "E2", config.edv2);
+    std::snprintf(line, sizeof(line), "CFG:%s", batteryConfigResultLabel(config.overallResult));
+    display->drawText(0, 6, line);
+    display->drawText(0, 7, "< page >");
+}
+
+static void drawBatteryCalibrationPage(GPGFX* display) {
+    char line[22] = {};
+    FightpadBQ27220BatteryAddon::ConfigurationSnapshot config = {};
+    display->drawText(0, 0, "BQ CAL 3/4");
+
+    if (!FightpadBQ27220BatteryAddon::getConfigurationSnapshot(config)) {
+        display->drawText(0, 2, "Cal read pending");
+        display->drawText(0, 7, "< page >");
+        return;
+    }
+
+    std::snprintf(line, sizeof(line), "CCO:%+d BO:%+d",
+        static_cast<int>(config.ccOffsetValid ? config.ccOffset : 0),
+        static_cast<int>(config.boardOffsetValid ? config.boardOffset : 0));
+    display->drawText(0, 1, line);
+
+    if (config.ccGainValid) {
+        std::snprintf(line, sizeof(line), "GAIN:%u.%06u",
+            static_cast<unsigned int>(config.ccGainMicro / 1000000u),
+            static_cast<unsigned int>(config.ccGainMicro % 1000000u));
+    } else {
+        std::snprintf(line, sizeof(line), "GAIN:BAD");
+    }
+    display->drawText(0, 2, line);
+    std::snprintf(line, sizeof(line), "G:%08lX", static_cast<unsigned long>(config.ccGainRaw));
+    display->drawText(0, 3, line);
+
+    if (config.ccDeltaValid) {
+        std::snprintf(line, sizeof(line), "DELTA:%lu", static_cast<unsigned long>(config.ccDeltaRounded));
+    } else {
+        std::snprintf(line, sizeof(line), "DELTA:BAD");
+    }
+    display->drawText(0, 4, line);
+    std::snprintf(line, sizeof(line), "D:%08lX", static_cast<unsigned long>(config.ccDeltaRaw));
+    display->drawText(0, 5, line);
+    display->drawText(0, 6, config.currentCalibrated ? "CAL:OK" : "CAL:UNCAL");
+    std::snprintf(line, sizeof(line), "R:%umR I:%umA",
+        static_cast<unsigned int>(FIGHTPAD12SLIM_BQ27220_SENSE_RESISTOR_MILLIOHMS),
+        static_cast<unsigned int>(FIGHTPAD12SLIM_BQ27220_CALIBRATION_CURRENT_MA));
+    display->drawText(0, 7, line);
+}
+
+static void drawBatteryChargePage(GPGFX* display) {
+    char line[22] = {};
+    FightpadBQ27220BatteryAddon::ConfigurationSnapshot config = {};
+    const bool configValid = FightpadBQ27220BatteryAddon::getConfigurationSnapshot(config);
+
+    display->drawText(0, 0, "BQ CHARGE 4/4");
+    if (configValid) {
+        drawBatteryWordCheck(display, 1, "CV", config.chargingVoltage);
+        drawBatteryWordCheck(display, 2, "TC", config.taperCurrent);
+        drawBatteryWordCheck(display, 3, "TV", config.taperVoltage);
+        drawBatteryHexWordCheck(display, 4, "SF", config.socFlagConfigA);
+    } else {
+        display->drawText(0, 1, "CV:---- WAIT");
+        display->drawText(0, 2, "TC:---- WAIT");
+        display->drawText(0, 3, "TV:---- WAIT");
+        display->drawText(0, 4, "SF:---- WAIT");
+    }
+
+    if (FightpadBQ27220BatteryAddon::isBatteryCurrentValid() &&
+        FightpadBQ27220BatteryAddon::isBatteryAverageCurrentValid()) {
+        std::snprintf(line, sizeof(line), "I:%+d AVG:%+d",
+            static_cast<int>(FightpadBQ27220BatteryAddon::getBatteryCurrentMilliamps()),
+            static_cast<int>(FightpadBQ27220BatteryAddon::getBatteryAverageCurrentMilliamps()));
+    } else if (FightpadBQ27220BatteryAddon::isBatteryAverageCurrentValid()) {
+        std::snprintf(line, sizeof(line), "I:----- AVG:%+d",
+            static_cast<int>(FightpadBQ27220BatteryAddon::getBatteryAverageCurrentMilliamps()));
+    } else if (FightpadBQ27220BatteryAddon::isBatteryCurrentValid()) {
+        std::snprintf(line, sizeof(line), "I:%+d AVG:-----",
+            static_cast<int>(FightpadBQ27220BatteryAddon::getBatteryCurrentMilliamps()));
+    } else {
+        std::snprintf(line, sizeof(line), "I:----- AVG:-----");
+    }
+    display->drawText(0, 5, line);
+
+    if (FightpadBQ27220BatteryAddon::isBatteryStatusValid()) {
+        std::snprintf(line, sizeof(line), "FC:%u TCA:%u",
+            FightpadBQ27220BatteryAddon::isBatteryFullChargeDetected() ? 1u : 0u,
+            FightpadBQ27220BatteryAddon::isBatteryTerminateChargeAlarm() ? 1u : 0u);
+    } else {
+        std::snprintf(line, sizeof(line), "FC:? TCA:?");
+    }
+    display->drawText(0, 6, line);
+    display->drawText(0, 7, "< page >");
+}
+
 void DisplayAddon::drawScrollWheelMenu() {
     // Snapshot volatile state once
     ScrollWheelMenuState snap;
@@ -331,6 +544,17 @@ void DisplayAddon::drawScrollWheelMenu() {
         return;
     }
 
+    if (level == SWMenuLevel::BATTERY_INFO) {
+        switch (snap.index % SW_BATTERY_PAGE_COUNT) {
+            case 0: drawBatteryRuntimePage(gpDisplay); break;
+            case 1: drawBatteryConfigPage(gpDisplay); break;
+            case 2: drawBatteryCalibrationPage(gpDisplay); break;
+            case 3: drawBatteryChargePage(gpDisplay); break;
+        }
+        gpDisplay->render();
+        return;
+    }
+
     // ── Normal list menu ───────────────────────────────────────────
     const SWMenuItem* table = nullptr;
     uint8_t count = 0;
@@ -349,6 +573,8 @@ void DisplayAddon::drawScrollWheelMenu() {
             table = kMenuButtonEffects; count = kMenuButtonEffectsCount; break;
         case SWMenuLevel::AMBIENT_EFFECT:
             table = kMenuAmbientEffects; count = kMenuAmbientEffectsCount; break;
+        case SWMenuLevel::BATTERY_INFO:
+            break;
         default: break;
     }
     if (table == nullptr || count == 0) {

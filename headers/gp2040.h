@@ -23,7 +23,7 @@ public:
     void setup();           // setup core0
     void run();             // loop core0
 private:
-    Gamepad snapshot;
+    Gamepad snapshot;   //
     AddonManager addons;
     // GPIO debouncer
     void debounceGpioGetAll();

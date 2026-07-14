@@ -62,6 +62,11 @@
 - 功能: 在 RGB Custom 的 Key Effect 菜单增加 Gradient，使用独立色轮状态实现全按键同步变色并保留 Key Flash
 - 讨论ID: `2026-07-13-key-effect-gradient`
 
+### BQ27220 启动配置回读与电流校准
+- 物理硬件: BQ27220 (GP25/GP26/GP27)、10 mOhm 采样电阻、318 mA 校准负载与外部电流表
+- 功能: 扩展启动实际回读与选择性修复，在层级 0 的 Battery Info 四页菜单显示运行数据、EDV/Battery 配置、CC 校准和充电终止状态，并在实测后固化 CC Gain/CC Delta
+- 讨论ID: `2026-07-13-bq27220-config-readback-calibration`
+
 ## 开发步骤状态
 
 | 步骤 | 描述 | 状态 | 讨论ID |
@@ -105,3 +110,11 @@
 | S14-B | GP22 Key Gradient独立动画状态与Key Flash覆盖 | completed | 2026-07-13-key-effect-gradient |
 | S14-C | Key Gradient代码静态验证 | completed | 2026-07-13-key-effect-gradient |
 | S14-D | Key Gradient菜单与灯效实机验证 | pending | 2026-07-13-key-effect-gradient |
+| S15-A | BQ27220启动配置完整回读 | completed | 2026-07-13-bq27220-config-readback-calibration |
+| S15-B | Battery Low与EDV选择性修复 | completed | 2026-07-13-bq27220-config-readback-calibration |
+| S15-C | Battery Info菜单与四页OLED显示 | completed | 2026-07-13-bq27220-config-readback-calibration |
+| S15-D | 318mA校准数据实机采集 | in_progress | 2026-07-13-bq27220-config-readback-calibration |
+| S15-E | CC Gain与CC Delta校准值写入验证 | pending | 2026-07-13-bq27220-config-readback-calibration |
+| S15-F | SOC/FCC完整放电回归验证 | pending | 2026-07-13-bq27220-config-readback-calibration |
+| S15-G | 充电终止参数选择性回读与修复 | completed | 2026-07-13-bq27220-config-readback-calibration |
+| S15-H | 200mA/50mV满充识别实机验证 | pending | 2026-07-13-bq27220-config-readback-calibration |

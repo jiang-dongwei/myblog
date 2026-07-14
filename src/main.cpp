@@ -16,7 +16,7 @@
 namespace __gnu_cxx {
 void __verbose_terminate_handler()
 {
-	abort();
+	abort();	// call abort() to terminate the program
 }
 }
 

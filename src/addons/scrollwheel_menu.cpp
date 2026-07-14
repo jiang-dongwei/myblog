@@ -13,6 +13,7 @@
 const SWMenuItem kMenuMain[] = {
     { "RP2350B FW Version", SWMenuLevel::INFO, 0 },
     { "ESP32C6 Status",     SWMenuLevel::INFO, 0 },
+    { "Battery Info",       SWMenuLevel::BATTERY_INFO, 0 },
     { "RGB Customize",      SWMenuLevel::RGB_SUB, 0 },
 };
 const uint8_t kMenuMainCount = sizeof(kMenuMain) / sizeof(kMenuMain[0]);
@@ -159,6 +160,7 @@ const SWMenuItem* ScrollWheelMenuAddon::currentMenuTable() const {
                                              return kMenuColors;
         case SWMenuLevel::BUTTON_EFFECT:  return kMenuButtonEffects;
         case SWMenuLevel::AMBIENT_EFFECT: return kMenuAmbientEffects;
+        case SWMenuLevel::BATTERY_INFO:   return kMenuMain;
         default:                          return kMenuMain;
     }
 }
@@ -175,6 +177,7 @@ uint8_t ScrollWheelMenuAddon::currentItemCount() const {
                                              return kMenuColorsCount;
         case SWMenuLevel::BUTTON_EFFECT:  return kMenuButtonEffectsCount;
         case SWMenuLevel::AMBIENT_EFFECT: return kMenuAmbientEffectsCount;
+        case SWMenuLevel::BATTERY_INFO:   return SW_BATTERY_PAGE_COUNT;
         default:                          return kMenuMainCount;
     }
 }
@@ -209,6 +212,7 @@ static void clampScrollOffset() {
                                              count = kMenuColorsCount; break;
         case SWMenuLevel::BUTTON_EFFECT:  count = kMenuButtonEffectsCount; break;
         case SWMenuLevel::AMBIENT_EFFECT: count = kMenuAmbientEffectsCount; break;
+        case SWMenuLevel::BATTERY_INFO:   count = SW_BATTERY_PAGE_COUNT; break;
         default: return;
     }
     if (g_menuState.scrollOffset > g_menuState.index)
@@ -245,6 +249,15 @@ void ScrollWheelMenuAddon::navSelect() {
 
     SWMenuLevel currentLevel = static_cast<SWMenuLevel>(g_menuState.level);
     uint8_t idx = g_menuState.index;
+
+    // Battery Info uses index as a page number.  A short press advances to
+    // the next page; the rotary inputs use navUp/navDown for either direction.
+    if (currentLevel == SWMenuLevel::BATTERY_INFO) {
+        g_menuState.index = static_cast<uint8_t>((idx + 1) % SW_BATTERY_PAGE_COUNT);
+        g_menuState.scrollOffset = 0;
+        markMenuDirty();
+        return;
+    }
 
     // RGB_SUB "RGB OFF" (index 3): immediate action — turn off all LEDs.
     // Reset colors to black and effects to default (Static Color).
@@ -423,6 +436,12 @@ void ScrollWheelMenuAddon::navBack() {
         break;
     case SWMenuLevel::RGB_SUB:
         // Back to MAIN, restore selection
+        g_menuState.level = static_cast<uint8_t>(SWMenuLevel::MAIN);
+        g_menuState.index = mainIndex;
+        g_menuState.scrollOffset = 0;
+        markMenuDirty();
+        break;
+    case SWMenuLevel::BATTERY_INFO:
         g_menuState.level = static_cast<uint8_t>(SWMenuLevel::MAIN);
         g_menuState.index = mainIndex;
         g_menuState.scrollOffset = 0;

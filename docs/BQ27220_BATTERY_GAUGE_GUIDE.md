@@ -16,8 +16,8 @@
 | Design Voltage | 3700 mV | 标称电压 |
 | 最高充电电压 | 4200 mV | 满充目标电压 |
 | 电芯规格最低电压 | 2750 mV | 电芯绝对下限，不等于产品建议工作下限 |
-| Taper Current | 25 mA | 充电终止电流，目标范围约 20-30 mA |
-| Taper Voltage | 100 mV | 终止检测电压裕量 |
+| Taper Current | 200 mA | BQ 满充识别阈值，匹配当前 TP4056 的实际截止行为 |
+| Taper Voltage | 50 mV | 满充识别电压裕量，要求电压高于 4150 mV |
 | Battery Low | 7.00% | EDV2 对应的 SOC |
 
 ### 1.2 硬件连接
@@ -164,10 +164,12 @@ BQ27220 的主要充电终止检测需要同时满足：
 
 ```text
 Charging Voltage = 4200 mV
-Taper Current     = 25 mA
-Taper Voltage     = 100 mV
-电压条件          = Voltage > 4100 mV
+Taper Current     = 200 mA
+Taper Voltage     = 50 mV
+电压条件          = Voltage > 4150 mV
 ```
+
+这里的 Taper Current 是 BQ27220 的满充识别阈值，不会改变 TP4056 的实际充电电流。当前硬件在约 120-140 mA 截止，若 BQ 仍使用 25 mA，则电流会从高于 25 mA 直接变为 0，无法同时满足容量继续增加的终止窗口。200 mA 用于首轮实机验证；通过 FC/TCA 验证后，可再尝试降低到 180 mA。
 
 正确识别主充电终止后，应检查：
 
@@ -187,13 +189,14 @@ Taper Voltage     = 100 mV
 | Voltage | 0x08 | mV，U16 | OLED 电池电压 |
 | BatteryStatus | 0x0A | 状态位，U16 | FC、TCA、放电等状态 |
 | Current | 0x0C | mA，I16 | OLED 电流 |
-| RemainingCapacity | 0x10 | mAh，U16 | 建议测试时增加读取 |
+| RemainingCapacity | 0x10 | mAh，U16 | Battery Info 第 1 页显示 RM |
 | FullChargeCapacity | 0x12 | mAh，U16 | OLED FCC |
+| AverageCurrent | 0x14 | mA，I16 | BQ内部滤波后的平均电流，充电终止判断依据 |
 | StateOfCharge | 0x2C | %，U16 | OLED SOC |
 | OperationStatus | 0x3A | 状态位，U16 | 安全状态和配置模式 |
 | DesignCapacity | 0x3C | mAh，U16 | 读取设计容量 |
 
-BQ27220 标准字数据通常按低字节、再高字节读取。
+BQ27220 标准字数据通常按低字节、再高字节读取。`Current()` 是每秒更新的瞬时值，`AverageCurrent()` 是芯片内部滤波后的平均值；Taper终止条件必须观察后者。
 
 ## 6. 当前使用的 Data Memory 参数
 
@@ -203,7 +206,7 @@ BQ27220 标准字数据通常按低字节、再高字节读取。
 | 0x9184 | CC Gain | 校准值，F4 | 电流比例 |
 | 0x9188 | CC Delta | 校准值，F4 | mAh 累计比例 |
 | 0x91FD | Charging Voltage | 4200 mV | 充电终止条件 |
-| 0x9201 | Taper Current | 25 mA | 充电终止条件 |
+| 0x9201 | Taper Current | 200 mA | 充电终止条件 |
 | 0x9251 | Battery Low % | 700 | 单位 0.01% |
 | 0x926B | Near Full | 需要核对 | 默认值相对 650mAh 电池可能偏大 |
 | 0x927F | SOC Flag Config A | 保留原值并置位终止标志使能 | 控制 FC/TCA |
@@ -212,7 +215,7 @@ BQ27220 标准字数据通常按低字节、再高字节读取。
 | 0x929D | Full Charge Capacity | 仅在 BQ27220 RAM 恢复默认后写入 650 mAh | 初始化学习基线 |
 | 0x929F | Design Capacity | 650 mAh | 设计参数 |
 | 0x92A3 | Design Voltage | 3700 mV | 设计参数 |
-| 0x92A5 | Taper Voltage | 100 mV | 充电终止条件 |
+| 0x92A5 | Taper Voltage | 50 mV | 充电终止条件 |
 | 0x92B4 | Fixed EDV0 | 2750 mV | 当前调试值 |
 | 0x92B7 | Fixed EDV1 | 3000 mV | 当前调试值 |
 | 0x92BA | Fixed EDV2 | 3300 mV | 对应 7% |
@@ -313,13 +316,30 @@ FCC 是 BQ27220 的学习值，不能在每次 RP2350 重启时覆盖。当前�
 
 ```text
 RP2350 启动
-    -> 读取 Design Capacity 和 CEDV Config
+    -> 读取 Design Capacity、充电终止参数和 CEDV Config
     -> 配置仍有效：不进入 CONFIG UPDATE，不写 FCC，不重新初始化
     -> BQ RAM 已恢复默认：写入配置和 FCC=650 mAh，再执行 REINIT
-    -> 仅 SC/EDV_CMP/CSYNC 不匹配：修正配置并退出，但不执行 REINIT
+    -> 仅充电参数、SOC Flag 或 SC/EDV_CMP/CSYNC 不匹配：修正配置并用 0x0092 退出，不执行 REINIT
 ```
 
 这样 RP2350 关机、重启不会破坏 BQ27220 在独立供电期间累计的 RM、SOC 和 Learned FCC。只有 BQ27220 自身掉电、RAM 参数恢复默认时，才重新建立 650 mAh 的初始学习基线。
+
+### 8.5 启动回读与 Battery Info 页面
+
+启动配置检查会先保存 Charging Voltage、Taper Current、Taper Voltage、SOC Flag Config A、Battery ID、Battery Low、EDV0/1/2、CC Offset、Board Offset、CC Gain 和 CC Delta 的真实回读值。充电参数、SOC Flag、Battery Low 或 EDV 不一致时，只修复不一致的项目，并再次回读确认；Battery ID 只读。
+
+BQ27220 TRM 的状态机说明提到 `Flags()[ITPOR]`，但同一版本公开的 `BatteryStatus()` 位表没有给出该位。因此固件不猜测未定义位，而是用 Design Capacity 与默认配置证据生成 `RAM:INIT` / `RAM:KEEP` 判断。`RAM:INIT` 只表示本次启动检测到 RAM 配置需要重建。
+
+层级 0 的 `Battery Info` 分为四页：
+
+1. SOC、Voltage、Current、RM、FCC 和整体读回状态。
+2. Battery ID、RAM 初始化判断、Battery Low 和 EDV0/1/2 的检查结果。
+3. CC Offset、Board Offset、CC Gain、CC Delta 的解码值和原始 F4 字节。
+4. Charging Voltage、Taper Current、Taper Voltage、SOC Flag Config A、瞬时 Current、AverageCurrent 和 FC/TCA。
+
+GP31/GP32 可前后翻页，GP30 短按进入下一页，GP19 返回层级 0。`OK` 表示原值正确，`FIX` 表示本次已修复并回读一致，`BAD` 表示读取、解码或二次校验失败，`UNCAL` 表示尚未固化实测电流校准值。
+
+Fightpad12Slim 原有的 `BUTTONS` 初始页及其电池诊断布局保持不变；`Battery Info` 是额外增加的菜单页面，不替换初始页。
 
 ## 9. 校准方法
 
@@ -334,11 +354,12 @@ RP2350 启动
 
 ### 9.2 电流比例校准
 
-1. 使用安全、稳定、已知的电子负载电流。
+1. 本板采样电阻为 10 mOhm，使用约 318 mA 的安全稳定放电负载。
 2. 用可信万用表串联测量实际电流。
-3. 比较 BQ27220 `Current()` 与万用表值。
-4. 通过 bqStudio 校准 Current，得到正确的 CC Gain 和 CC Delta。
-5. 检查放电方向是否为负值，充电方向是否为正值。
+3. 连续记录至少 5 组稳定的实际电流和 BQ27220 `Current()`；最终计算使用电流表实测值，不使用负载标称值。
+4. 同时记录第 3 页的 CC Gain、CC Delta 原始 F4 字节，以及 CC Offset 和 Board Offset。
+5. 根据实测比例计算新 CC Gain/CC Delta，写入后逐字节回读验证。
+6. 检查放电方向是否为负值，充电方向是否为正值，并确认 318 mA 附近误差不超过约 3%。
 
 TI 校准指南使用较大电流作为示例，但本产品只有 650 mAh 电池。实际校准电流必须符合电芯、保护板、采样电阻和 PCB 的安全额定值，不能盲目照搬示例电流。
 
@@ -399,9 +420,9 @@ Battery Low=7% 时，理论值约为：
 ### 11.2 充满阶段
 
 1. 充电到约 4.2 V。
-2. 等待充电电流下降到 25 mA 以下。
-3. 保持足够时间满足两个 Taper Window。
-4. 确认 FC=1、TCA=1。
+2. 确认电压高于 4150 mV，并观察充电电流下降到 200 mA 以下。
+3. 观察 AverageCurrent 低于 200 mA，并保持足够时间满足两个 40 秒 Taper Window。
+4. 在 TP4056 截止前后确认 FC=1、TCA=1，并确认 RM=FCC、SOC=100%。
 5. 记录 SOC、RM、FCC、电压和电流。
 
 ### 11.3 放电阶段
@@ -510,3 +531,8 @@ BQ27220 负责估算电量，但不能代替系统电源保护。
 - `src/gp2040aux.cpp`：BQ27220 Addon 在 Core1 的注册入口。
 - `src/display/ui/screens/ButtonLayoutScreen.cpp`：OLED 电池诊断显示。
 - `.emv2/discussion/2026-07-09-bq27220-battery-soc-fcc-stability/`：本项目的审计和测试讨论记录。
+
+----
+
+CC Delta ≈ CC Gain × 1,193,046(TI算法使用的固定时间基准/内部数值换算系数)
+0.238 × 1,193,046 ≈ 283945
