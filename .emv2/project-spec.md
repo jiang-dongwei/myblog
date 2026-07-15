@@ -67,6 +67,16 @@
 - 功能: 扩展启动实际回读与选择性修复，在层级 0 的 Battery Info 四页菜单显示运行数据、EDV/Battery 配置、CC 校准和充电终止状态，并在实测后固化 CC Gain/CC Delta
 - 讨论ID: `2026-07-13-bq27220-config-readback-calibration`
 
+### BQ27220 电量档位串口快照
+- 物理硬件: RP2350B UART1，GP42=TX、GP43=RX，115200 8N1
+- 功能: SOC 精确到达 100/75/50/25/15/10/7/3/0% 时，按 P1-P4 组织并打印覆盖 Battery Info 四页字段的串口快照
+- 讨论ID: `2026-07-14-bq27220-battery-uart-logging`
+
+### 7% 低电灯光关闭
+- 物理硬件: 复用 BQ27220、GP22 的 12 颗按键灯和 GP40 的 19 颗环境灯
+- 功能: 有效 SOC 小于等于 7% 时强制全部灯光关闭，回升到 8% 后恢复当前菜单灯效且不改持久化配置
+- 讨论ID: `2026-07-14-low-battery-led-cutoff`
+
 ## 开发步骤状态
 
 | 步骤 | 描述 | 状态 | 讨论ID |
@@ -118,3 +128,9 @@
 | S15-F | SOC/FCC完整放电回归验证 | pending | 2026-07-13-bq27220-config-readback-calibration |
 | S15-G | 充电终止参数选择性回读与修复 | completed | 2026-07-13-bq27220-config-readback-calibration |
 | S15-H | 200mA/50mV满充识别实机验证 | pending | 2026-07-13-bq27220-config-readback-calibration |
+| S16-A | UART1 AUX GP42/GP43初始化与四页快照格式化 | completed | 2026-07-14-bq27220-battery-uart-logging |
+| S16-B | 100/75/50/25/15/10/7/3/0%精确档位单次触发 | completed | 2026-07-14-bq27220-battery-uart-logging |
+| S16-C | 串口抓取与完整放电实机验证 | pending | 2026-07-14-bq27220-battery-uart-logging |
+| S17-A | BQ27220有效SOC生成7%低电灯光保护状态 | completed | 2026-07-14-low-battery-led-cutoff |
+| S17-B | GP22/GP40统一渲染入口强制全黑并自动恢复 | completed | 2026-07-14-low-battery-led-cutoff |
+| S17-C | 8%/7%/3%/0%及充电恢复实机验证 | pending | 2026-07-14-low-battery-led-cutoff |

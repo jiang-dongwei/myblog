@@ -34,6 +34,10 @@
 #define FIGHTPAD12SLIM_BQ27220_I2C_DELAY_US 5
 #endif
 
+#ifndef FIGHTPAD12SLIM_BQ27220_LIGHTS_OFF_PERCENT
+#define FIGHTPAD12SLIM_BQ27220_LIGHTS_OFF_PERCENT 7
+#endif
+
 #ifndef FIGHTPAD12SLIM_BQ27220_DIAGNOSTIC_DISPLAY
 #define FIGHTPAD12SLIM_BQ27220_DIAGNOSTIC_DISPLAY 0
 #endif
@@ -114,6 +118,26 @@
 #define FIGHTPAD12SLIM_BQ27220_CURRENT_CALIBRATED 0
 #endif
 
+#ifndef FIGHTPAD12SLIM_BQ27220_LOG_UART_ENABLED
+#define FIGHTPAD12SLIM_BQ27220_LOG_UART_ENABLED 0
+#endif
+
+#ifndef FIGHTPAD12SLIM_BQ27220_LOG_UART
+#define FIGHTPAD12SLIM_BQ27220_LOG_UART uart1
+#endif
+
+#ifndef FIGHTPAD12SLIM_BQ27220_LOG_UART_BAUD
+#define FIGHTPAD12SLIM_BQ27220_LOG_UART_BAUD 115200
+#endif
+
+#ifndef FIGHTPAD12SLIM_BQ27220_LOG_UART_TX_PIN
+#define FIGHTPAD12SLIM_BQ27220_LOG_UART_TX_PIN -1
+#endif
+
+#ifndef FIGHTPAD12SLIM_BQ27220_LOG_UART_RX_PIN
+#define FIGHTPAD12SLIM_BQ27220_LOG_UART_RX_PIN -1
+#endif
+
 #define FightpadBQ27220BatteryName "FightpadBQ27220Battery"
 
 static_assert(FIGHTPAD12SLIM_BQ27220_EDV_CMP == 0 || FIGHTPAD12SLIM_BQ27220_EDV_CMP == 1,
@@ -122,6 +146,11 @@ static_assert(FIGHTPAD12SLIM_BQ27220_INDEPENDENT_CHARGER == 0 || FIGHTPAD12SLIM_
     "FIGHTPAD12SLIM_BQ27220_INDEPENDENT_CHARGER must be 0 or 1");
 static_assert(FIGHTPAD12SLIM_BQ27220_CSYNC == 0 || FIGHTPAD12SLIM_BQ27220_CSYNC == 1,
     "FIGHTPAD12SLIM_BQ27220_CSYNC must be 0 or 1");
+static_assert(FIGHTPAD12SLIM_BQ27220_LOG_UART_ENABLED == 0 || FIGHTPAD12SLIM_BQ27220_LOG_UART_ENABLED == 1,
+    "FIGHTPAD12SLIM_BQ27220_LOG_UART_ENABLED must be 0 or 1");
+static_assert(FIGHTPAD12SLIM_BQ27220_LIGHTS_OFF_PERCENT >= 0 &&
+    FIGHTPAD12SLIM_BQ27220_LIGHTS_OFF_PERCENT <= 100,
+    "FIGHTPAD12SLIM_BQ27220_LIGHTS_OFF_PERCENT must be in the range 0..100");
 
 class FightpadBQ27220BatteryAddon : public GPAddon {
 public:
@@ -206,6 +235,7 @@ public:
     static bool isBatteryPercentValid();
     static uint8_t getBatteryPercent();
     static uint8_t getBatteryLevelBars();
+    static bool isLowBatteryLightCutoffActive();
     static bool isBatteryVoltageValid();
     static uint16_t getBatteryVoltageMillivolts();
     static bool isBatteryCurrentValid();
@@ -235,6 +265,9 @@ public:
 
 private:
     void configurePins();
+    void configureBatteryLogUart();
+    void maybeLogBatterySnapshot();
+    void logBatterySnapshot();
     bool checkBatteryGaugeConfiguration(bool& configurationCurrent, bool& requiresReinitialization);
     bool configureBatteryGauge(bool reinitialize);
     bool enterFullAccessMode();
@@ -276,6 +309,8 @@ private:
     bool batteryConfigAttempted = false;
     bool batteryConfigApplied = false;
     bool cedvConfigNeedsRepair = false;
+    bool batteryLogUartConfigured = false;
+    uint8_t lastLoggedBatteryLevel = 0xFF;
     uint32_t nextPollTimeMs = 0;
 };
 

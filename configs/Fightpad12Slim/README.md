@@ -61,10 +61,10 @@ Enter RP2350 BOOTSEL mode using the board recovery path/test pad, then copy the 
 | GP21 | VBUS-present sense | `ASSIGNED_TO_ADDON` | Read by the ESP32 proxy battery path to detect external USB power |
 | GP22 | Button WS2812 data | `ASSIGNED_TO_ADDON` + `BOARD_LEDS_PIN = 22` | Workbook says 12 LEDs |
 | GP23 | Power / status LED | `BOARD_LED_PIN = 23`, `BOARD_LED_ENABLED = 1` | Confirm on hardware |
-| GP24 | 5V boost enable | `ASSIGNED_TO_ADDON` | Ambient addon drive disabled after blank-OLED test |
-| GP25 | Free / reserved | `ASSIGNED_TO_ADDON` | No schematic consumer confirmed |
-| GP26 | Free / reserved | `ASSIGNED_TO_ADDON` | Stale workbook VBAT notes remain; schematic shows VBAT on GP41 / ADC1 |
-| GP27 | Reserved / free | `ASSIGNED_TO_ADDON` | Current config reserves it |
+| GP24 | 5V boost enable | `ASSIGNED_TO_ADDON` + ambient LED addon | Driven high by the current Fightpad ambient configuration |
+| GP25 | BQ27220 software-I2C SCL | `ASSIGNED_TO_ADDON` + BQ27220 | Battery gauge clock |
+| GP26 | BQ27220 software-I2C SDA | `ASSIGNED_TO_ADDON` + BQ27220 | Battery gauge data |
+| GP27 | BQ27220 GPOUT | `ASSIGNED_TO_ADDON` + BQ27220 | Battery gauge status input |
 | GP28 | USB expansion D+ | `ASSIGNED_TO_ADDON` + `USB_PERIPHERAL_PIN_DPLUS = 28` | PIO-USB host |
 | GP29 | USB expansion D- | `ASSIGNED_TO_ADDON` | Implicit pair to GP28 |
 | GP30 | Ambient LED on/off | `ASSIGNED_TO_ADDON` + diagnostic input | Upper-left OLED dot; active-low |
@@ -77,9 +77,9 @@ Enter RP2350 BOOTSEL mode using the board recovery path/test pad, then copy the 
 | GP37 | UART1 RX from ESP32-C6 TXD | `ASSIGNED_TO_ADDON` | Follow-up BT HCI |
 | GP38 | UART1 CTS from ESP32-C6 RTS | `ASSIGNED_TO_ADDON` | Follow-up BT HCI |
 | GP39 | UART1 RTS to ESP32-C6 CTS | `ASSIGNED_TO_ADDON` | Follow-up BT HCI |
-| GP40 | Ambient WS2812 data | `ASSIGNED_TO_ADDON` | Ambient addon disabled in current safe UF2 |
+| GP40 | Ambient WS2812 data | `ASSIGNED_TO_ADDON` + Fightpad ambient LED addon | Active 19-LED chain on PIO2/SM0 |
 | GP41 | Battery voltage sense | `ASSIGNED_TO_ADDON` | Sampled by the ESP32 proxy battery path through the schematic 100k/100k divider |
-| GP42-GP43 | Free / ADC-capable | `ASSIGNED_TO_ADDON` | Locked in v1 until high-GPIO mapping is audited |
+| GP42-GP43 | Battery telemetry UART1 TX/RX | `ASSIGNED_TO_ADDON` + BQ27220 log | 115200 8N1; RP2350 AUX UART function |
 | GP44 | UART0 TX to ESP32-C6 RXD | `ASSIGNED_TO_ADDON` + ESP32 proxy | Runtime BT-HID input frame output |
 | GP45 | UART0 RX from ESP32-C6 TXD | `ASSIGNED_TO_ADDON` + ESP32 proxy | Reserved for ESP logs/replies |
 | GP46-GP47 | Free / ADC-capable | `ASSIGNED_TO_ADDON` | Locked in v1 until high-GPIO mapping is audited |
@@ -90,7 +90,7 @@ Enter RP2350 BOOTSEL mode using the board recovery path/test pad, then copy the 
 
 ## Ambient LED Controls
 
-The Fightpad-specific ambient LED addon was added for the independent GP40 WS2812 chain, but GP40 output is disabled in the current diagnostic UF2 after the first hardware test produced a blank OLED and no ambient LEDs. This diagnostic only initializes GP30-GP32 as pulled-up active-low inputs and shows them as three small upper-left OLED dots. It does not drive GP24 or GP40.
+The Fightpad-specific ambient LED addon owns both WS2812 outputs: the 19-LED GP40 ambient chain on PIO2/SM0 and the 12-LED GP22 button chain on PIO2/SM1. The current board configuration enables the addon and drives GP24 high for the LED-rail boost enable. GP30-GP32 remain the scrollwheel/menu controls; the old ambient control diagnostic paths are disabled.
 
 ## ESP32-C6 BLE HID Feed
 
@@ -104,13 +104,30 @@ GP33 is the runtime transport switch. High selects USB-HID and stops the ESP inp
 
 The runtime build does not drive GP34 or GP35. Those nets are left for the physical ESP32-C6 RESET and BOOT buttons.
 
+## BQ27220 Battery Snapshot UART
+
+The BQ27220 addon sends a diagnostic snapshot on RP2350 UART1 at 115200 8N1 whenever the sampled SOC is exactly 100%, 75%, 50%, 25%, 15%, 10%, 7%, 3%, or 0%. Each snapshot is wrapped in `[BATTERY]` / `[/BATTERY]`; P1-P4 cover the runtime, EDV/configuration, current-calibration, and charge-termination fields shown by the four OLED Battery Info pages.
+
+Connect GP42 (RP2350 TX) to the RX input of a 3.3 V TTL USB-UART adapter and connect grounds. GP43 is initialized as RP2350 RX but the current diagnostic has no receive command parser, so it may be left disconnected. Do not connect these pins directly to RS-232 levels or a 5 V UART.
+
+The BQ27220 is polled every 2 seconds. A target skipped between polls is intentionally not backfilled with a neighboring SOC reading. During one boot, continuous samples at the same target do not repeat; a different target must be logged before the previous target can be logged again. Restarting the RP2350 clears this RAM-only duplicate suppression.
+
+## BQ27220 Low-Battery LED Cutoff
+
+After a valid BQ27220 SOC sample reaches 7% or lower, the Fightpad LED owner forces both WS2812 frames to black: all 12 button LEDs on GP22 and all 19 ambient LEDs on GP40. The cutoff is a render-only override, so RGB menu colors, effects, Key Flash settings, and stored configuration are not changed. A later valid SOC sample above 7% automatically restores the currently selected effects.
+
+The cutoff state is published atomically from the Core1 BQ27220 sampler to the Core0 LED renderer. A failed SOC read retains the previous cutoff state, preventing a transient I2C error from relighting a low battery. Before the first valid SOC sample after boot, the firmware does not guess the battery level, so a unit that boots already at or below 7% can remain lit until that first sample completes.
+
+This feature sends black LED frames; it does not disable the GP24 LED-rail boost supply and does not affect the separate GP23 status LED.
+
 ## Known Limitations
 
 - `Fightpad12Slim.cmake` uses the local `fightpad12slim.h` board header for RP2350B, GP23 status LED, and W25Q128JVSI 16 MiB flash metadata. Confirm with `picotool info` on hardware.
-- GP24 is the 5V boost enable net. The current safe UF2 does not drive it from the ambient path; full USB-vs-battery LED power policy is still open.
+- GP24 is the 5V boost enable net and the current ambient configuration drives it high. The 7% cutoff sends black frames but leaves this rail enabled; a future hard power-gating policy still requires hardware back-power and shared-load verification.
 - The workbook Pinout sheet now assigns `VBAT_SENSE_PIN = 41`, labels GP41 as ADC1, and describes VBAT routed to GP41. Stale workbook text still marks GP27 as ADC1 and mentions GP41 BT pairing. The schematic/RP2350B pinout is treated as authoritative: battery sampling is GP41 / ADC1.
 - `LEDS_BUTTON_*` and ambient LED ordering are intentionally not finalized. The workbook says 18 ambient LEDs, while the schematic labels extend through `LED_19`; confirm physical count and chain order on hardware.
 - ESP32-C6 update flow through RP2350 is still follow-up work. BLE battery UI now uses RP2350 GP41 ADC sampling plus GP21 VBUS detection and is forwarded over the runtime UART link.
+- The battery snapshot logger owns UART1. The planned GP36-GP39 ESP32-C6 BT HCI link cannot be enabled at the same time without moving one function to another UART or PIO implementation.
 
 ## References
 

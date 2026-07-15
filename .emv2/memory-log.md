@@ -372,3 +372,60 @@ Base Effect 和 Key Effect 都需要同时提供两个呼吸灯入口：
 - 第四页显示充电参数实际回读、瞬时 Current、`AverageCurrent(0x14)` 和 BatteryStatus 的 FC/TCA，用真实平均电流验证Taper窗口。
 - Fightpad12Slim 板级采样电阻记录为 10 mOhm，校准负载记录为 318 mA，当前保持 `CAL:UNCAL`，等待至少 5 组外部电流表/BQ 实测数据后再计算并写入 CC Gain/CC Delta。
 - `git diff --check` 和定向源码审计通过；按仓库约定未运行编译，S15-D 等待用户构建和实机采样。
+
+## 2026-07-14: BQ27220 电量档位串口快照 (S16)
+
+### 需求
+
+- 使用 RP2350B 的 GPIO42/GPIO43 增加电量信息串口输出。
+- SOC 到达 100%、75%、50%、25%、15%、10%、7%、3%、0% 时各触发一次 Battery Info 快照。
+
+### 决策
+
+1. 使用 UART1、115200 8N1，GP42=TX、GP43=RX；RP2350 高 GPIO 必须通过 `UART_FUNCSEL_NUM()` 选择 AUX UART 复用，不能直接使用普通 `GPIO_FUNC_UART`。
+2. 串口输出按 P1-P4 组织并覆盖 Battery Info 四页字段，包括运行值、EDV/Battery 配置、CC 校准和充电终止状态。
+3. BQ27220 每 2 秒轮询一次，仅在本轮 SOC 精确等于目标档位时触发，不用相邻档位的数据补记两次轮询间跳过的目标。
+4. 本次启动期间，连续停留或短暂离开后回到同一目标不重复；命中另一个目标档位后才允许未来再次记录此前档位。RP2350 重启后去重状态清零。
+5. UART0 GP44/GP45 继续供 ESP32 proxy 使用；当前 UART1 无运行时冲突，但未来 GP36-GP39 BT HCI 不可与本日志同时占用 UART1。
+6. 按仓库约定不运行编译，由用户完成构建和串口实机验证。
+
+### 讨论ID
+
+`2026-07-14-bq27220-battery-uart-logging`
+
+### 实现记录
+
+- BoardConfig 启用 BQ27220 日志 UART1，固定 GP42 TX、GP43 RX、115200 8N1。
+- BQ27220 每轮采样完成后检查目标 SOC，使用固定栈缓冲输出，未使用动态内存。
+- 日志使用 `[BATTERY]`/`[/BATTERY]` 包围，P1-P4 覆盖 OLED Battery Info 页面字段并增加 TRIGGER/UPTIME/有效性标签；无效字段显示 `NA`、`?` 或 `WAIT`。
+- 目标档位为 100/75/50/25/15/10/7/3/0%，同一目标连续采样只打印一次。
+- 已完成定向静态检查；按仓库约定未编译，S16-C 等待用户构建和实机验证。
+
+## 2026-07-14: 7% 低电灯光关闭 (S17)
+
+### 需求
+
+- BQ27220 电量降低到 7% 时关闭 GP22 的 12 颗按键灯和 GP40 的 19 颗环境灯。
+- 低电时所有 Base/Key 效果和 Key Flash 都不能重新点亮 LED。
+
+### 决策
+
+1. 使用 `SOC <= 7%`，覆盖直接从 8% 跳到 6%、3% 或 0% 的情况。
+2. BQ27220 Core1 只在 SOC 成功读回时更新原子保护状态；读取失败保持上一次状态。
+3. 启动尚未得到有效 SOC 时不猜测低电，首次有效样本小于等于 7% 后再关闭。
+4. 在 `render()` 提前返回减少无用效果计算，并在两条灯链共同的最终 `show()` 写入点再次清零，防止启动、诊断或 Key Flash 路径越过保护。
+5. 保护只覆盖输出帧，不修改 `enabled`、菜单颜色、效果编号或 Flash 配置；有效 SOC 回升到 8% 后自动恢复当前灯效。
+6. 只关闭 31 颗 WS2812 的发光，不切断 GP24 升压供电，也不关闭独立的 GP23 状态灯。
+7. 按仓库约定不运行编译，由用户完成构建和实机验证。
+
+### 讨论ID
+
+`2026-07-14-low-battery-led-cutoff`
+
+### 实现记录
+
+- BoardConfig 新增 `FIGHTPAD12SLIM_BQ27220_LIGHTS_OFF_PERCENT=7`。
+- BQ27220 采样端新增 `std::atomic_bool` 低电灯光保护状态和只读接口，使用 release/acquire 跨核发布。
+- `FightpadAmbientLEDAddon::render()` 在全黑帧初始化后检查保护状态；`show()` 在 GP40/GP22 `SetFrame()` 前执行最终清零。
+- 通用 `NeoPicoLEDAddon` 继续由 `FIGHTPAD12SLIM_AMBIENT_OWNS_GP22=1` 禁用，不存在 GP22 后写覆盖。
+- 静态源代码检查和 `git diff --check` 通过；按仓库约定未编译，S17-C 等待 8%/7%/3%/0% 与充电恢复实机验证。

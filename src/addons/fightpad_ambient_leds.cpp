@@ -1,5 +1,7 @@
 #include "addons/fightpad_ambient_leds.h"
 
+#include "addons/fightpad_bq27220_battery.h"
+
 #include "gamepad.h"
 #include "storagemanager.h"
 #include <cmath>
@@ -432,6 +434,13 @@ void FightpadAmbientLEDAddon::nextEffect() {
 void FightpadAmbientLEDAddon::render(uint32_t now) {
     clearFrame();
 
+    // Low-battery protection is a transient render override.  It does not
+    // change the user's enabled/effect/color settings, so the current effect
+    // resumes automatically after a valid SOC sample rises above the cutoff.
+    if (FightpadBQ27220BatteryAddon::isLowBatteryLightCutoffActive()) {
+        return;
+    }
+
     if (!enabled) {
         return;
     }
@@ -760,6 +769,13 @@ void FightpadAmbientLEDAddon::renderButtons(uint32_t now) {
 }
 
 void FightpadAmbientLEDAddon::show() {
+    // Final writer guard: setup/diagnostic paths can call show() without first
+    // passing through render().  Clear both chains here as well so no Base,
+    // Key, or Key Flash frame can bypass the <=7% battery cutoff.
+    if (FightpadBQ27220BatteryAddon::isLowBatteryLightCutoffActive()) {
+        clearFrame();
+    }
+
     neopico.SetFrame(frame);
     neopico.Show();
 

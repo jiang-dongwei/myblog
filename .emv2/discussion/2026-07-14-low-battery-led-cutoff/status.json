@@ -1,0 +1,18 @@
+{
+  "discussion_id": "2026-07-14-low-battery-led-cutoff",
+  "created_at": "2026-07-14",
+  "current_phase": 5,
+  "phases": {
+    "split": "completed",
+    "requirements": "completed",
+    "hardware": "completed",
+    "brainstorm": "completed",
+    "milestones": "completed"
+  },
+  "subsystems": [
+    "BQ27220 low-battery state",
+    "WS2812 blackout override",
+    "automatic recovery"
+  ],
+  "current_subsystem": 2
+}
