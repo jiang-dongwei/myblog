@@ -1107,5 +1107,13 @@ void app_main(void)
     ESP_LOGI(TAG, "app_main: nimble host enabled");
 
     xTaskCreate(pair_button_task, "pair_button_task", 2048, NULL, 5, &s_pair_button_task);
+
+    /* Boot: default transport to BT if RP2350 hasn't set it yet, then open
+     * pairing window so BLE is discoverable + modem sleep has an RF schedule */
+    if (!s_transport_mode_seen) {
+        set_transport_bt_enabled(true);
+    }
+    open_pairing_window();
+
     ESP_LOGI(TAG, "app_main: pair button task started");
 }
