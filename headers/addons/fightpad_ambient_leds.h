@@ -102,6 +102,18 @@
 #define FIGHTPAD12SLIM_AMBIENT_BOOST_EN_LEVEL 1
 #endif
 
+#ifndef FIGHTPAD12SLIM_AMBIENT_POWER_GATE_WHEN_OFF
+#define FIGHTPAD12SLIM_AMBIENT_POWER_GATE_WHEN_OFF 0
+#endif
+
+#ifndef FIGHTPAD12SLIM_AMBIENT_BOOST_STARTUP_DELAY_MS
+#define FIGHTPAD12SLIM_AMBIENT_BOOST_STARTUP_DELAY_MS 5
+#endif
+
+#ifndef FIGHTPAD12SLIM_AMBIENT_BOOST_SHUTDOWN_DELAY_US
+#define FIGHTPAD12SLIM_AMBIENT_BOOST_SHUTDOWN_DELAY_US 1000
+#endif
+
 #ifndef FIGHTPAD12SLIM_AMBIENT_POWER_ONLY_DIAGNOSTIC
 #define FIGHTPAD12SLIM_AMBIENT_POWER_ONLY_DIAGNOSTIC 0
 #endif
@@ -188,6 +200,7 @@ private:
     void renderAmbient(uint32_t now);   // GP40 19-LED chain effects
     void renderButtons(uint32_t now);   // GP22 12-LED chain effects
     void show();
+    void setBoostPower(bool powerEnabled);
     void fill(RGB color, float brightness = FIGHTPAD12SLIM_AMBIENT_BRIGHTNESS);
     void clearFrame();
     float getBreathBrightness(uint32_t now);
@@ -206,6 +219,8 @@ private:
     uint32_t gp22FlashUntil[100] = {};
     uint32_t renderCounter = 0;
     bool enabled = FIGHTPAD12SLIM_AMBIENT_BOOT_ENABLE != 0;
+    // True is also the safe fallback for boards without a controllable rail.
+    bool boostPowerEnabled = true;
 
     // ── Effect animation state ──────────────────────────────
     int16_t  wheelFrame = 0;          // rainbow color wheel position (0-255, signed for bounce)

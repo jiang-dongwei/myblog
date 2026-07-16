@@ -66,6 +66,14 @@
 #define DISPLAY_SAVER_TIMEOUT 0
 #endif
 
+#ifndef FIGHTPAD12SLIM_OLED_IDLE_SLEEP_ENABLED
+#define FIGHTPAD12SLIM_OLED_IDLE_SLEEP_ENABLED 0
+#endif
+
+#ifndef FIGHTPAD12SLIM_OLED_IDLE_SLEEP_TIMEOUT_MS
+#define FIGHTPAD12SLIM_OLED_IDLE_SLEEP_TIMEOUT_MS 60000
+#endif
+
 #ifndef BUTTON_LAYOUT
 #define BUTTON_LAYOUT BUTTON_LAYOUT_STICK
 #endif
@@ -238,6 +246,7 @@ private:
     void drawScrollWheelMenu();
     uint32_t displaySaverTimeout = 0;
     int32_t displaySaverTimer;
+    uint32_t lastScrollWheelActivityMs = 0;
     uint8_t displayIsPowerOn = 1;
     uint32_t prevMillis;
     std::string statusBar;

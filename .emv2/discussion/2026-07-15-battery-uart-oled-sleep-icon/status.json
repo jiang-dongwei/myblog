@@ -1,0 +1,19 @@
+{
+  "discussion_id": "2026-07-15-battery-uart-oled-sleep-icon",
+  "created_at": "2026-07-15",
+  "current_phase": 5,
+  "phases": {
+    "split": "completed",
+    "requirements": "completed",
+    "hardware": "completed",
+    "brainstorm": "completed",
+    "milestones": "completed"
+  },
+  "subsystems": [
+    "2-second battery UART",
+    "GP30/31/32 OLED inactivity sleep",
+    "BUTTONS battery gauge",
+    "hardware verification"
+  ],
+  "current_subsystem": 3
+}

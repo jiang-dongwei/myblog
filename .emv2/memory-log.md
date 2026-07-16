@@ -429,3 +429,111 @@ Base Effect 和 Key Effect 都需要同时提供两个呼吸灯入口：
 - `FightpadAmbientLEDAddon::render()` 在全黑帧初始化后检查保护状态；`show()` 在 GP40/GP22 `SetFrame()` 前执行最终清零。
 - 通用 `NeoPicoLEDAddon` 继续由 `FIGHTPAD12SLIM_AMBIENT_OWNS_GP22=1` 禁用，不存在 GP22 后写覆盖。
 - 静态源代码检查和 `git diff --check` 通过；按仓库约定未编译，S17-C 等待 8%/7%/3%/0% 与充电恢复实机验证。
+
+## 2026-07-15: 电量周期串口、OLED休眠与主页面电量格 (S18)
+
+### 需求
+
+- GP42/GP43 电量快照从 SOC 档位触发改成每 2 秒发送。
+- GP30/31/32 连续 1 分钟无操作后 OLED 休眠，任一输入再次变化时唤醒。
+- BUTTONS 主页面移除 SOC/V/I/FCC 诊断覆盖，保留右上角四格电池图标和右下角 SOC 百分比。
+
+### 决策
+
+1. 串口复用 BQ27220 的 2000 ms 轮询节拍，每轮均输出 P1-P4；单字段读取失败仍输出本轮并以 `NA/?/WAIT` 标记。
+2. Core0 在 GP30/31/32 原始边沿更新原子活动时间戳，Core1 DisplayAddon 读取时间戳控制 `setPower()`；不让显示侧重复读取或去抖 GPIO。
+3. 休眠期间停止 OLED 绘制和 I2C 刷帧；首次唤醒边沿不消费，原按键/拨轮处理继续执行。
+4. 复用已有四格电池图标、SOC 到 0..4 格映射和百分比绘制函数；图标保持右上角，百分比保持右下角，完整诊断数值从 Battery Info 菜单查看。
+5. GP19 不计入本次专用空闲计时；Battery Info 四页、7% 关灯和 RGB 行为不变。
+6. 按仓库约定不运行编译，由用户完成构建和实机验证。
+
+### 讨论ID
+
+`2026-07-15-battery-uart-oled-sleep-icon`
+
+### 实现记录
+
+- 删除 UART 的 SOC 档位表、档位判断和 `lastLoggedBatteryLevel` 去重状态；每次 BQ27220 轮询完成后输出一组 `[BATTERY]` P1-P4。
+- 周期日志头改为 `PERIOD:2000ms`；SOC 读取失败时与其他字段一样输出 `NA`，不跳过整组日志。
+- GP30/31/32 原始边沿通过 `std::atomic<uint32_t>` 发布最后活动时间；DisplayAddon 在 60000 ms 空闲后调用驱动 `setPower(false)` 并跳过渲染，首次新边沿自动上电。
+- BUTTONS 关闭全屏 BQ 数值诊断，四格电池图标保持像素 `(99,0)`，状态栏保留前 14 个字符；右下角继续显示 SOC 百分比，原按键布局和 Battery Info 四页保留。
+- `git diff --check`、旧档位状态残留搜索和定向源码审计通过；按仓库约定未运行编译，S18-D 等待用户构建和实机验证。
+
+## 2026-07-15: 隐藏 Battery Info 层级 0 入口 (S19)
+
+### 需求与决策
+
+- 正常菜单的层级 0 不再显示 `Battery Info`，但四页诊断代码需要保留供以后调试。
+- 新增 `SCROLLWHEEL_BATTERY_INFO_MENU_ENABLED`；默认值为 1，Fightpad12Slim 板级配置设为 0。
+- 该宏只条件编译 `kMenuMain` 中的入口，不删除 `SWMenuLevel::BATTERY_INFO`、四页绘制、翻页或返回逻辑。
+- `kMenuMainCount` 继续由数组大小自动计算；隐藏入口后 RP2350B、ESP32C6、RGB Customize 的导航不依赖旧索引。
+- 按仓库约定不运行编译，由用户完成构建和实机验证。
+
+### 讨论ID
+
+`2026-07-15-hide-battery-info-menu`
+
+## 2026-07-15: RGB Customize 三档亮度控制规划 (S20)
+
+### 需求
+
+- 在 `RGB Customize` 子菜单增加 `Brightness`。
+- 提供 `Bright=0.5f`、`Normal=0.3f`、`Dim=0.1f` 三档，不提供 OFF。
+- 一个档位同时控制 Key Effect 与 Base Effect 的 Static Color、Gradient、Rainbow。
+
+### 决策
+
+1. Flash 只保存 `0/1/2` 档位编号，在渲染时转换为浮点亮度；旧配置默认 Bright。
+2. 短按 GP30 立即应用并保存，停留在亮度列表，GP19 返回；当前档位显示 `*`。
+3. Key Flash 保持 `0.8f`，Chase 与 Breathing 保持各自算法，7% 低电关灯保持最高优先级。
+4. Brightness 插入 Base Effect 与 All OFF 之间，并使用命名索引避免原 All OFF 裸索引失效。
+5. 按仓库约定不运行编译，由用户完成构建和实机验证。
+
+### 讨论ID
+
+`2026-07-15-rgb-brightness-levels`
+
+### 实现记录
+
+- `FightpadAmbientLEDOptions` 新增 `brightnessLevel=6`，默认 `0=Bright`，启动时对越界值回退为 Bright。
+- `RGB Customize` 顺序变为 Key Flash、Key Effect、Base Effect、Brightness、All OFF；Brightness 提供 Bright/Normal/Dim，并显示当前档位 `*`。
+- 短按 GP30 立即保存并停留在亮度列表，GP19 返回 RGB Customize；All OFF 使用命名索引 4，避免与新增项冲突。
+- GP22/GP40 的 Static Color、Gradient、Rainbow 使用共享 `0.5f/0.3f/0.1f`；Key Flash 保持 `0.8f`，Chase/Breathing 和 7% 低电保护不变。
+- 定向源码检查和 `git diff --check` 通过；按仓库约定未运行编译，S20-E 等待用户构建和实机验证。
+
+## 2026-07-15: 呼吸灯峰值亮度调整
+
+- Key/Base 当前菜单 Breathing 的范围从 `0.02f~1.0f` 改为 `0.02f~0.5f`，完整周期保持 `2400ms`。
+- 旧 Base Breathing Rainbow 隐藏分支峰值同步改为 `0.5f`，步进从 `0.008f` 降为 `0.004f`，保持原有往返节奏。
+- Key Flash 继续使用 `0.8f`，因此按键闪灯始终高于呼吸灯峰值。
+- `git diff --check` 通过；按仓库约定未运行编译。
+
+## 2026-07-15: RGB关闭时GP24电源门控 (S22)
+
+### 原理图纠正
+
+- 重新检查 `22-FIGHTPAD_20260625-schematic_new.pdf`：GPIO24/`5V_EN` 只连接 FP6276 的 EN，输出为 RGB 使用的 `VCC_5V`。
+- RP2350 与 ESP32 使用独立的 3.3V 电源路径；旧 S11 讨论中“GP24 会同时影响 RP2350/ESP32”的记录不适用于当前 20260625 原理图版本。
+
+### 实现决策
+
+- `FightpadAmbientLEDAddon` 保持为 GP24 唯一写入者；菜单只发布运行时 RGB 电源请求。
+- `All OFF` 先向 GP22/GP40 两条灯链发送最终全黑帧，等待 1ms 后拉低 GP24。
+- 选择非黑颜色或动态灯效时拉高 GP24，等待 5ms 后发送恢复帧；选择 Brightness 不会单独唤醒灯光。
+- Flash 继续用既有“三个黑色 + 两个默认效果”表示 `All OFF`，启动时据此恢复门控状态，不增加配置字段。
+- 7% 低电强制关灯复用同一门控路径，SOC 恢复后自动重新上电并恢复当前效果。
+- 板级宏 `FIGHTPAD12SLIM_AMBIENT_POWER_GATE_WHEN_OFF` 可快速停用硬门控并回退为只发送黑帧。
+- GP24宏引用搜索确认只有 `FightpadAmbientLEDAddon` 初始化和门控函数写入；菜单与低电状态路径检查、`git diff --check` 通过。
+- 按仓库约定不运行编译，由用户完成构建和实机验证。
+
+### 讨论ID
+
+`2026-07-15-rgb-gp24-power-gating`
+
+### S22-E首次实测失败
+
+- 用户关闭RGB后测量GP24仍为3.3V，没有拉低。
+- 已记录至 `.emv2/checkpoints/HVR-S22-001.md`，S22-E进入返工。
+- 当前无新增串口日志，后续检查All OFF请求传播、实际板级宏和GP24最后写入者。
+- 根因核对：build目录的ELF/UF2为16:22旧产物，相关OBJ为16:21；GP24门控源码在17:57至18:04才修改，旧ELF也没有新门控符号。
+- 当前不再改动门控状态机；等待用户重新构建、确认UF2时间戳更新并烧录后复测。

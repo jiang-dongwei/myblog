@@ -61,7 +61,7 @@ Enter RP2350 BOOTSEL mode using the board recovery path/test pad, then copy the 
 | GP21 | VBUS-present sense | `ASSIGNED_TO_ADDON` | Read by the ESP32 proxy battery path to detect external USB power |
 | GP22 | Button WS2812 data | `ASSIGNED_TO_ADDON` + `BOARD_LEDS_PIN = 22` | Workbook says 12 LEDs |
 | GP23 | Power / status LED | `BOARD_LED_PIN = 23`, `BOARD_LED_ENABLED = 1` | Confirm on hardware |
-| GP24 | 5V boost enable | `ASSIGNED_TO_ADDON` + ambient LED addon | Driven high by the current Fightpad ambient configuration |
+| GP24 | 5V RGB-rail boost enable | `ASSIGNED_TO_ADDON` + ambient LED addon | High while RGB output is active; low after a final black frame when RGB is off |
 | GP25 | BQ27220 software-I2C SCL | `ASSIGNED_TO_ADDON` + BQ27220 | Battery gauge clock |
 | GP26 | BQ27220 software-I2C SDA | `ASSIGNED_TO_ADDON` + BQ27220 | Battery gauge data |
 | GP27 | BQ27220 GPOUT | `ASSIGNED_TO_ADDON` + BQ27220 | Battery gauge status input |
@@ -90,7 +90,7 @@ Enter RP2350 BOOTSEL mode using the board recovery path/test pad, then copy the 
 
 ## Ambient LED Controls
 
-The Fightpad-specific ambient LED addon owns both WS2812 outputs: the 19-LED GP40 ambient chain on PIO2/SM0 and the 12-LED GP22 button chain on PIO2/SM1. The current board configuration enables the addon and drives GP24 high for the LED-rail boost enable. GP30-GP32 remain the scrollwheel/menu controls; the old ambient control diagnostic paths are disabled.
+The Fightpad-specific ambient LED addon owns both WS2812 outputs: the 19-LED GP40 ambient chain on PIO2/SM0 and the 12-LED GP22 button chain on PIO2/SM1. It is also the sole writer of the active-high GP24 RGB-rail boost enable. `All OFF` first sends black to both chains, waits 1 ms for the PIO data and WS2812 latch interval, then drives GP24 low. Selecting a visible color/effect raises GP24, waits 5 ms for the rail to settle, and sends the restored frame. The persisted all-black/default-effect `All OFF` state is reconstructed at boot without adding a new protobuf field. GP30-GP32 remain the scrollwheel/menu controls; the old ambient control diagnostic paths are disabled.
 
 ## ESP32-C6 BLE HID Feed
 
@@ -106,11 +106,17 @@ The runtime build does not drive GP34 or GP35. Those nets are left for the physi
 
 ## BQ27220 Battery Snapshot UART
 
-The BQ27220 addon sends a diagnostic snapshot on RP2350 UART1 at 115200 8N1 whenever the sampled SOC is exactly 100%, 75%, 50%, 25%, 15%, 10%, 7%, 3%, or 0%. Each snapshot is wrapped in `[BATTERY]` / `[/BATTERY]`; P1-P4 cover the runtime, EDV/configuration, current-calibration, and charge-termination fields shown by the four OLED Battery Info pages.
+The BQ27220 addon samples the gauge every 2 seconds and sends one compact line on RP2350 UART1 at 115200 8N1 every 4 seconds. The line contains only `SOC`, voltage, instantaneous current, and full-charge capacity, for example `SOC:59% V:3868mV I:-305mA FCC:650mAh`. An invalid field is reported as `NA` instead of reusing stale data.
 
 Connect GP42 (RP2350 TX) to the RX input of a 3.3 V TTL USB-UART adapter and connect grounds. GP43 is initialized as RP2350 RX but the current diagnostic has no receive command parser, so it may be left disconnected. Do not connect these pins directly to RS-232 levels or a 5 V UART.
 
-The BQ27220 is polled every 2 seconds. A target skipped between polls is intentionally not backfilled with a neighboring SOC reading. During one boot, continuous samples at the same target do not repeat; a different target must be logged before the previous target can be logged again. Restarting the RP2350 clears this RAM-only duplicate suppression.
+The first line follows the configured BQ27220 boot delay, then output uses `FIGHTPAD12SLIM_BQ27220_LOG_INTERVAL_MS=4000` while gauge polling remains at `FIGHTPAD12SLIM_BQ27220_POLL_INTERVAL_MS=2000`. UART writes have a bounded per-byte wait; a timeout aborts the current line and forces UART1 to be initialized again before the next period instead of blocking the battery task indefinitely.
+
+## OLED Battery Gauge and Idle Sleep
+
+The BUTTONS page keeps the normal button viewer and shows the BQ27220 numeric SOC immediately to the left of the four-cell battery icon in the upper-right corner. It does not overlay voltage, current, or FCC diagnostics. The four Battery Info debug pages are available from the level-0 menu through `SCROLLWHEEL_BATTERY_INFO_MENU_ENABLED=1`.
+
+Core0 records every raw edge on GP30, GP31, or GP32. When no edge has been seen for 60 seconds, the Core1 display addon powers off the SSD1306 and skips further frame rendering. The first new edge powers the OLED back on immediately and is still processed normally by the scrollwheel/menu input logic. GP19 BACK does not reset this dedicated inactivity timer.
 
 ## BQ27220 Low-Battery LED Cutoff
 
@@ -118,12 +124,12 @@ After a valid BQ27220 SOC sample reaches 7% or lower, the Fightpad LED owner for
 
 The cutoff state is published atomically from the Core1 BQ27220 sampler to the Core0 LED renderer. A failed SOC read retains the previous cutoff state, preventing a transient I2C error from relighting a low battery. Before the first valid SOC sample after boot, the firmware does not guess the battery level, so a unit that boots already at or below 7% can remain lit until that first sample completes.
 
-This feature sends black LED frames; it does not disable the GP24 LED-rail boost supply and does not affect the separate GP23 status LED.
+This feature uses the same final-black-frame sequence and then disables the GP24 LED-rail boost supply. When a valid SOC sample rises above the cutoff, GP24 is enabled and the current effect resumes automatically. The separate GP23 status LED is not affected.
 
 ## Known Limitations
 
 - `Fightpad12Slim.cmake` uses the local `fightpad12slim.h` board header for RP2350B, GP23 status LED, and W25Q128JVSI 16 MiB flash metadata. Confirm with `picotool info` on hardware.
-- GP24 is the 5V boost enable net and the current ambient configuration drives it high. The 7% cutoff sends black frames but leaves this rail enabled; a future hard power-gating policy still requires hardware back-power and shared-load verification.
+- The `22-FIGHTPAD_20260625-schematic_new.pdf` schematic shows GPIO24/`5V_EN` driving only the FP6276 `VCC_5V` boost rail used by the RGB chains; RP2350 and ESP32 use the independent 3.3V rail. Hardware validation should still confirm that GP22/GP40 stay low while the 5V rail is off and that no board revision routes another load from `VCC_5V`.
 - The workbook Pinout sheet now assigns `VBAT_SENSE_PIN = 41`, labels GP41 as ADC1, and describes VBAT routed to GP41. Stale workbook text still marks GP27 as ADC1 and mentions GP41 BT pairing. The schematic/RP2350B pinout is treated as authoritative: battery sampling is GP41 / ADC1.
 - `LEDS_BUTTON_*` and ambient LED ordering are intentionally not finalized. The workbook says 18 ambient LEDs, while the schematic labels extend through `LED_19`; confirm physical count and chain order on hardware.
 - ESP32-C6 update flow through RP2350 is still follow-up work. BLE battery UI now uses RP2350 GP41 ADC sampling plus GP21 VBUS detection and is forwarded over the runtime UART link.

@@ -5,7 +5,6 @@
 
 #include <atomic>
 #include <cmath>
-#include <cstddef>
 #include <cstdio>
 
 namespace
@@ -65,10 +64,6 @@ namespace
     static constexpr uint8_t BQ27220_SHORT_MAC_DATA_LENGTH = 0x06;
     static constexpr uint16_t I2C_SCL_HIGH_TIMEOUT_US = 10000;
     static constexpr uint16_t I2C_BUS_FREE_DELAY_US = 80;
-#if FIGHTPAD12SLIM_BQ27220_LOG_UART_ENABLED
-    static constexpr uint8_t BATTERY_LOG_LEVELS[] = { 100, 75, 50, 25, 15, 10, 7, 3, 0 };
-#endif
-
     bool batteryPercentValid = false;
     uint8_t batteryPercent = 0;
     uint8_t batteryLevelBars = 0;
@@ -117,75 +112,6 @@ namespace
             (static_cast<uint32_t>(bytes[2]) << 8) |
             static_cast<uint32_t>(bytes[3]);
     }
-
-#if FIGHTPAD12SLIM_BQ27220_LOG_UART_ENABLED
-    const char* configCheckResultLabel(FightpadBQ27220BatteryAddon::ConfigCheckResult result)
-    {
-        switch (result) {
-            case FightpadBQ27220BatteryAddon::ConfigCheckResult::OK:
-                return "OK";
-            case FightpadBQ27220BatteryAddon::ConfigCheckResult::FIXED:
-                return "FIX";
-            case FightpadBQ27220BatteryAddon::ConfigCheckResult::BAD:
-                return "BAD";
-            case FightpadBQ27220BatteryAddon::ConfigCheckResult::NOT_CHECKED:
-            default:
-                return "WAIT";
-        }
-    }
-
-    bool isBatteryLogLevel(uint8_t percent)
-    {
-        for (uint8_t level : BATTERY_LOG_LEVELS) {
-            if (percent == level) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    void formatConfigWord(char* output, std::size_t outputSize,
-        const FightpadBQ27220BatteryAddon::ConfigWordSnapshot& word)
-    {
-        if (!word.valid) {
-            std::snprintf(output, outputSize, "----(BAD)");
-        } else if (word.result == FightpadBQ27220BatteryAddon::ConfigCheckResult::FIXED) {
-            std::snprintf(output, outputSize, "%u>%u(FIX)",
-                static_cast<unsigned int>(word.before), static_cast<unsigned int>(word.after));
-        } else if (word.result == FightpadBQ27220BatteryAddon::ConfigCheckResult::BAD &&
-            word.before != word.target) {
-            std::snprintf(output, outputSize, "%u/%u(BAD)",
-                static_cast<unsigned int>(word.before), static_cast<unsigned int>(word.target));
-        } else {
-            std::snprintf(output, outputSize, "%u(%s)",
-                static_cast<unsigned int>(word.after), configCheckResultLabel(word.result));
-        }
-    }
-
-    void formatConfigHexWord(char* output, std::size_t outputSize,
-        const FightpadBQ27220BatteryAddon::ConfigWordSnapshot& word)
-    {
-        if (!word.valid) {
-            std::snprintf(output, outputSize, "----(BAD)");
-        } else if (word.result == FightpadBQ27220BatteryAddon::ConfigCheckResult::FIXED) {
-            std::snprintf(output, outputSize, "%04X>%04X(FIX)",
-                static_cast<unsigned int>(word.before), static_cast<unsigned int>(word.after));
-        } else if (word.result == FightpadBQ27220BatteryAddon::ConfigCheckResult::BAD &&
-            word.before != word.target) {
-            std::snprintf(output, outputSize, "%04X/%04X(BAD)",
-                static_cast<unsigned int>(word.before), static_cast<unsigned int>(word.target));
-        } else {
-            std::snprintf(output, outputSize, "%04X(%s)",
-                static_cast<unsigned int>(word.after), configCheckResultLabel(word.result));
-        }
-    }
-
-    void writeBatteryLogLine(const char* line)
-    {
-        uart_puts(FIGHTPAD12SLIM_BQ27220_LOG_UART, line);
-        uart_puts(FIGHTPAD12SLIM_BQ27220_LOG_UART, "\r\n");
-    }
-#endif
 
     bool timeReached(uint32_t now, uint32_t target)
     {
@@ -244,7 +170,6 @@ void FightpadBQ27220BatteryAddon::setup()
     batteryConfigApplied = false;
     cedvConfigNeedsRepair = false;
     batteryLogUartConfigured = false;
-    lastLoggedBatteryLevel = 0xFF;
     batteryReadStatus = ReadStatus::NOT_STARTED;
     batterySecurityStatusValid = false;
     batterySecurityStatusBits = 0;
@@ -258,6 +183,7 @@ void FightpadBQ27220BatteryAddon::setup()
     batteryDataMemoryDebugLength = 0;
     batteryConfigurationSnapshot = {};
     nextPollTimeMs = getMillis() + FIGHTPAD12SLIM_BQ27220_BOOT_DELAY_MS;
+    nextBatteryLogTimeMs = nextPollTimeMs;
 
     configureBatteryLogUart();
 
@@ -358,7 +284,7 @@ void FightpadBQ27220BatteryAddon::process()
 #endif
     }
 
-    maybeLogBatterySnapshot();
+    logPeriodicBatterySnapshot(now);
 
     nextPollTimeMs = now + FIGHTPAD12SLIM_BQ27220_POLL_INTERVAL_MS;
 }
@@ -384,32 +310,68 @@ void FightpadBQ27220BatteryAddon::configureBatteryLogUart()
 #endif
 }
 
-void FightpadBQ27220BatteryAddon::maybeLogBatterySnapshot()
+bool FightpadBQ27220BatteryAddon::writeBatteryLogLine(const char* line)
 {
 #if FIGHTPAD12SLIM_BQ27220_LOG_UART_ENABLED
+    const auto writeText = [](const char* text) {
+        while (*text != '\0') {
+            const uint64_t waitStartUs = time_us_64();
+            while (!uart_is_writable(FIGHTPAD12SLIM_BQ27220_LOG_UART)) {
+                if ((time_us_64() - waitStartUs) >= FIGHTPAD12SLIM_BQ27220_LOG_UART_BYTE_TIMEOUT_US) {
+                    return false;
+                }
+                tight_loop_contents();
+            }
+            uart_putc_raw(FIGHTPAD12SLIM_BQ27220_LOG_UART, *text++);
+        }
+        return true;
+    };
+
+    if (!writeText(line) || !writeText("\r\n")) {
+        batteryLogUartConfigured = false;
+        return false;
+    }
+    return true;
+#else
+    (void)line;
+    return false;
+#endif
+}
+
+void FightpadBQ27220BatteryAddon::logPeriodicBatterySnapshot(uint32_t now)
+{
+#if FIGHTPAD12SLIM_BQ27220_LOG_UART_ENABLED
+    if (!timeReached(now, nextBatteryLogTimeMs)) {
+        return;
+    }
+    nextBatteryLogTimeMs = now + FIGHTPAD12SLIM_BQ27220_LOG_INTERVAL_MS;
+
     if (!batteryLogUartConfigured) {
         configureBatteryLogUart();
     }
-    if (!batteryLogUartConfigured || !batteryPercentValid ||
-        !isBatteryLogLevel(batteryPercent) || batteryPercent == lastLoggedBatteryLevel) {
+    if (!batteryLogUartConfigured) {
         return;
     }
 
     logBatterySnapshot();
-    lastLoggedBatteryLevel = batteryPercent;
 #endif
 }
 
 void FightpadBQ27220BatteryAddon::logBatterySnapshot()
 {
 #if FIGHTPAD12SLIM_BQ27220_LOG_UART_ENABLED
-    char line[192] = {};
+    char line[80] = {};
     char voltage[16] = {};
     char current[16] = {};
-    char averageCurrent[16] = {};
-    char remainingCapacity[16] = {};
     char fullChargeCapacity[16] = {};
+    char stateOfCharge[8] = {};
 
+    if (batteryPercentValid) {
+        std::snprintf(stateOfCharge, sizeof(stateOfCharge), "%u%%",
+            static_cast<unsigned int>(batteryPercent));
+    } else {
+        std::snprintf(stateOfCharge, sizeof(stateOfCharge), "NA");
+    }
     if (batteryVoltageValid) {
         std::snprintf(voltage, sizeof(voltage), "%umV", static_cast<unsigned int>(batteryVoltageMillivolts));
     } else {
@@ -420,18 +382,6 @@ void FightpadBQ27220BatteryAddon::logBatterySnapshot()
     } else {
         std::snprintf(current, sizeof(current), "NA");
     }
-    if (batteryAverageCurrentValid) {
-        std::snprintf(averageCurrent, sizeof(averageCurrent), "%+dmA",
-            static_cast<int>(batteryAverageCurrentMilliamps));
-    } else {
-        std::snprintf(averageCurrent, sizeof(averageCurrent), "NA");
-    }
-    if (batteryRemainingCapacityValid) {
-        std::snprintf(remainingCapacity, sizeof(remainingCapacity), "%umAh",
-            static_cast<unsigned int>(batteryRemainingCapacityMah));
-    } else {
-        std::snprintf(remainingCapacity, sizeof(remainingCapacity), "NA");
-    }
     if (batteryFullChargeCapacityValid) {
         std::snprintf(fullChargeCapacity, sizeof(fullChargeCapacity), "%umAh",
             static_cast<unsigned int>(batteryFullChargeCapacityMah));
@@ -439,113 +389,10 @@ void FightpadBQ27220BatteryAddon::logBatterySnapshot()
         std::snprintf(fullChargeCapacity, sizeof(fullChargeCapacity), "NA");
     }
 
-    const bool configValid = batteryConfigurationSnapshot.valid;
     std::snprintf(line, sizeof(line),
-        "[BATTERY] TRIGGER:%u%% UPTIME:%lums",
-        static_cast<unsigned int>(batteryPercent), static_cast<unsigned long>(getMillis()));
+        "SOC:%s V:%s I:%s FCC:%s",
+        stateOfCharge, voltage, current, fullChargeCapacity);
     writeBatteryLogLine(line);
-    std::snprintf(line, sizeof(line),
-        "P1 SOC:%u%% V:%s I:%s AVG:%s RM:%s FCC:%s CFG:%s READ:%s",
-        static_cast<unsigned int>(batteryPercent), voltage, current, averageCurrent,
-        remainingCapacity, fullChargeCapacity,
-        configValid ? configCheckResultLabel(batteryConfigurationSnapshot.overallResult) : "WAIT",
-        batteryReadStatus == ReadStatus::OK ? "OK" : "ERR");
-    writeBatteryLogLine(line);
-
-    if (configValid) {
-        {
-            char batteryId[4] = {};
-            char batteryLow[24] = {};
-            char edv0[24] = {};
-            char edv1[24] = {};
-            char edv2[24] = {};
-            if (batteryConfigurationSnapshot.batteryIdValid) {
-                std::snprintf(batteryId, sizeof(batteryId), "%02X",
-                    static_cast<unsigned int>(batteryConfigurationSnapshot.batteryId));
-            } else {
-                std::snprintf(batteryId, sizeof(batteryId), "--");
-            }
-            formatConfigWord(batteryLow, sizeof(batteryLow), batteryConfigurationSnapshot.batteryLow);
-            formatConfigWord(edv0, sizeof(edv0), batteryConfigurationSnapshot.edv0);
-            formatConfigWord(edv1, sizeof(edv1), batteryConfigurationSnapshot.edv1);
-            formatConfigWord(edv2, sizeof(edv2), batteryConfigurationSnapshot.edv2);
-            std::snprintf(line, sizeof(line),
-                "P2 ID:%s RAM:%s LOW:%s E0:%s E1:%s E2:%s CFG:%s",
-                batteryId,
-                batteryConfigurationSnapshot.batteryIdValid ?
-                    (batteryConfigurationSnapshot.ramReinitializationRequired ? "INIT" : "KEEP") : "?",
-                batteryLow, edv0, edv1, edv2,
-                configCheckResultLabel(batteryConfigurationSnapshot.overallResult));
-            writeBatteryLogLine(line);
-        }
-
-        {
-            char ccOffset[16] = {};
-            char boardOffset[16] = {};
-            char ccGain[24] = {};
-            char ccDelta[24] = {};
-            if (batteryConfigurationSnapshot.ccOffsetValid) {
-                std::snprintf(ccOffset, sizeof(ccOffset), "%+d(OK)",
-                    static_cast<int>(batteryConfigurationSnapshot.ccOffset));
-            } else {
-                std::snprintf(ccOffset, sizeof(ccOffset), "NA(BAD)");
-            }
-            if (batteryConfigurationSnapshot.boardOffsetValid) {
-                std::snprintf(boardOffset, sizeof(boardOffset), "%+d(OK)",
-                    static_cast<int>(batteryConfigurationSnapshot.boardOffset));
-            } else {
-                std::snprintf(boardOffset, sizeof(boardOffset), "NA(BAD)");
-            }
-            if (batteryConfigurationSnapshot.ccGainValid) {
-                std::snprintf(ccGain, sizeof(ccGain), "%u.%06u(OK)",
-                    static_cast<unsigned int>(batteryConfigurationSnapshot.ccGainMicro / 1000000u),
-                    static_cast<unsigned int>(batteryConfigurationSnapshot.ccGainMicro % 1000000u));
-            } else {
-                std::snprintf(ccGain, sizeof(ccGain), "NA(BAD)");
-            }
-            if (batteryConfigurationSnapshot.ccDeltaValid) {
-                std::snprintf(ccDelta, sizeof(ccDelta), "%lu(OK)",
-                    static_cast<unsigned long>(batteryConfigurationSnapshot.ccDeltaRounded));
-            } else {
-                std::snprintf(ccDelta, sizeof(ccDelta), "NA(BAD)");
-            }
-            std::snprintf(line, sizeof(line),
-                "P3 CCO:%s BO:%s GAIN:%s G:%08lX DELTA:%s D:%08lX CAL:%s R:%umR CALI:%umA",
-                ccOffset, boardOffset, ccGain,
-                static_cast<unsigned long>(batteryConfigurationSnapshot.ccGainRaw),
-                ccDelta, static_cast<unsigned long>(batteryConfigurationSnapshot.ccDeltaRaw),
-                batteryConfigurationSnapshot.currentCalibrated ? "OK" : "UNCAL",
-                static_cast<unsigned int>(FIGHTPAD12SLIM_BQ27220_SENSE_RESISTOR_MILLIOHMS),
-                static_cast<unsigned int>(FIGHTPAD12SLIM_BQ27220_CALIBRATION_CURRENT_MA));
-            writeBatteryLogLine(line);
-        }
-
-        {
-            char chargingVoltage[24] = {};
-            char taperCurrent[24] = {};
-            char taperVoltage[24] = {};
-            char socFlagConfigA[32] = {};
-            formatConfigWord(chargingVoltage, sizeof(chargingVoltage), batteryConfigurationSnapshot.chargingVoltage);
-            formatConfigWord(taperCurrent, sizeof(taperCurrent), batteryConfigurationSnapshot.taperCurrent);
-            formatConfigWord(taperVoltage, sizeof(taperVoltage), batteryConfigurationSnapshot.taperVoltage);
-            formatConfigHexWord(socFlagConfigA, sizeof(socFlagConfigA), batteryConfigurationSnapshot.socFlagConfigA);
-            std::snprintf(line, sizeof(line),
-                "P4 CV:%s TC:%s TV:%s SF:%s I:%s AVG:%s FC:%s TCA:%s",
-                chargingVoltage, taperCurrent, taperVoltage, socFlagConfigA, current, averageCurrent,
-                batteryStatusValid ? (batteryStatus & BQ27220_BATTERY_STATUS_FC_MASK ? "1" : "0") : "?",
-                batteryStatusValid ? (batteryStatus & BQ27220_BATTERY_STATUS_TCA_MASK ? "1" : "0") : "?");
-            writeBatteryLogLine(line);
-        }
-    } else {
-        writeBatteryLogLine("P2 CONFIG:WAIT");
-        writeBatteryLogLine("P3 CONFIG:WAIT");
-        std::snprintf(line, sizeof(line), "P4 CONFIG:WAIT I:%s AVG:%s FC:%s TCA:%s",
-            current, averageCurrent,
-            batteryStatusValid ? (batteryStatus & BQ27220_BATTERY_STATUS_FC_MASK ? "1" : "0") : "?",
-            batteryStatusValid ? (batteryStatus & BQ27220_BATTERY_STATUS_TCA_MASK ? "1" : "0") : "?");
-        writeBatteryLogLine(line);
-    }
-    writeBatteryLogLine("[/BATTERY]");
 #endif
 }
 

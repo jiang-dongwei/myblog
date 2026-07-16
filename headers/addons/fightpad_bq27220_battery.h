@@ -130,6 +130,14 @@
 #define FIGHTPAD12SLIM_BQ27220_LOG_UART_BAUD 115200
 #endif
 
+#ifndef FIGHTPAD12SLIM_BQ27220_LOG_INTERVAL_MS
+#define FIGHTPAD12SLIM_BQ27220_LOG_INTERVAL_MS 4000
+#endif
+
+#ifndef FIGHTPAD12SLIM_BQ27220_LOG_UART_BYTE_TIMEOUT_US
+#define FIGHTPAD12SLIM_BQ27220_LOG_UART_BYTE_TIMEOUT_US 2000
+#endif
+
 #ifndef FIGHTPAD12SLIM_BQ27220_LOG_UART_TX_PIN
 #define FIGHTPAD12SLIM_BQ27220_LOG_UART_TX_PIN -1
 #endif
@@ -148,6 +156,10 @@ static_assert(FIGHTPAD12SLIM_BQ27220_CSYNC == 0 || FIGHTPAD12SLIM_BQ27220_CSYNC 
     "FIGHTPAD12SLIM_BQ27220_CSYNC must be 0 or 1");
 static_assert(FIGHTPAD12SLIM_BQ27220_LOG_UART_ENABLED == 0 || FIGHTPAD12SLIM_BQ27220_LOG_UART_ENABLED == 1,
     "FIGHTPAD12SLIM_BQ27220_LOG_UART_ENABLED must be 0 or 1");
+static_assert(FIGHTPAD12SLIM_BQ27220_LOG_INTERVAL_MS > 0,
+    "FIGHTPAD12SLIM_BQ27220_LOG_INTERVAL_MS must be greater than zero");
+static_assert(FIGHTPAD12SLIM_BQ27220_LOG_UART_BYTE_TIMEOUT_US > 0,
+    "FIGHTPAD12SLIM_BQ27220_LOG_UART_BYTE_TIMEOUT_US must be greater than zero");
 static_assert(FIGHTPAD12SLIM_BQ27220_LIGHTS_OFF_PERCENT >= 0 &&
     FIGHTPAD12SLIM_BQ27220_LIGHTS_OFF_PERCENT <= 100,
     "FIGHTPAD12SLIM_BQ27220_LIGHTS_OFF_PERCENT must be in the range 0..100");
@@ -266,7 +278,8 @@ public:
 private:
     void configurePins();
     void configureBatteryLogUart();
-    void maybeLogBatterySnapshot();
+    bool writeBatteryLogLine(const char* line);
+    void logPeriodicBatterySnapshot(uint32_t now);
     void logBatterySnapshot();
     bool checkBatteryGaugeConfiguration(bool& configurationCurrent, bool& requiresReinitialization);
     bool configureBatteryGauge(bool reinitialize);
@@ -310,8 +323,8 @@ private:
     bool batteryConfigApplied = false;
     bool cedvConfigNeedsRepair = false;
     bool batteryLogUartConfigured = false;
-    uint8_t lastLoggedBatteryLevel = 0xFF;
     uint32_t nextPollTimeMs = 0;
+    uint32_t nextBatteryLogTimeMs = 0;
 };
 
 #endif

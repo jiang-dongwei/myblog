@@ -67,15 +67,30 @@
 - 功能: 扩展启动实际回读与选择性修复，在层级 0 的 Battery Info 四页菜单显示运行数据、EDV/Battery 配置、CC 校准和充电终止状态，并在实测后固化 CC Gain/CC Delta
 - 讨论ID: `2026-07-13-bq27220-config-readback-calibration`
 
-### BQ27220 电量档位串口快照
+### BQ27220 电量档位串口快照（历史模式，已由 S18 周期模式替代）
 - 物理硬件: RP2350B UART1，GP42=TX、GP43=RX，115200 8N1
-- 功能: SOC 精确到达 100/75/50/25/15/10/7/3/0% 时，按 P1-P4 组织并打印覆盖 Battery Info 四页字段的串口快照
+- 功能: 最初在 SOC 精确到达 100/75/50/25/15/10/7/3/0% 时打印 P1-P4；S18-A 已改为每次 2 秒轮询后打印
 - 讨论ID: `2026-07-14-bq27220-battery-uart-logging`
 
 ### 7% 低电灯光关闭
 - 物理硬件: 复用 BQ27220、GP22 的 12 颗按键灯和 GP40 的 19 颗环境灯
 - 功能: 有效 SOC 小于等于 7% 时强制全部灯光关闭，回升到 8% 后恢复当前菜单灯效且不改持久化配置
 - 讨论ID: `2026-07-14-low-battery-led-cutoff`
+
+### 电量周期串口、OLED休眠与主页面电量格
+- 物理硬件: BQ27220、UART1 GP42/GP43、SSD1306 OLED、GP30/GP31/GP32
+- 功能: 每次 2 秒 BQ 轮询后输出 P1-P4；GP30/31/32 无操作 60 秒后 OLED 关屏并由首次输入唤醒；BUTTONS 右上角用四格图标表示 SOC、右下角保留百分比，不显示 V/I/FCC 诊断数值
+- 讨论ID: `2026-07-15-battery-uart-oled-sleep-icon`
+
+### 隐藏 Battery Info 菜单入口
+- 物理硬件: 无变化
+- 功能: Fightpad12Slim 层级 0 隐藏 Battery Info，但保留四页诊断和导航实现，通过板级宏可随时恢复
+- 讨论ID: `2026-07-15-hide-battery-info-menu`
+
+### RGB Customize 三档亮度控制
+- 物理硬件: 无新增硬件，复用 GP22 的 12 颗按键灯与 GP40 的 19 颗环境灯
+- 功能: RGB Customize 增加 Brightness，可用 Bright/Normal/Dim 三档同时控制 Key/Base 的 Static Color、Gradient、Rainbow，并持久化当前档位
+- 讨论ID: `2026-07-15-rgb-brightness-levels`
 
 ## 开发步骤状态
 
@@ -129,8 +144,25 @@
 | S15-G | 充电终止参数选择性回读与修复 | completed | 2026-07-13-bq27220-config-readback-calibration |
 | S15-H | 200mA/50mV满充识别实机验证 | pending | 2026-07-13-bq27220-config-readback-calibration |
 | S16-A | UART1 AUX GP42/GP43初始化与四页快照格式化 | completed | 2026-07-14-bq27220-battery-uart-logging |
-| S16-B | 100/75/50/25/15/10/7/3/0%精确档位单次触发 | completed | 2026-07-14-bq27220-battery-uart-logging |
+| S16-B | 100/75/50/25/15/10/7/3/0%精确档位单次触发（历史实现，S18-A已替代） | completed | 2026-07-14-bq27220-battery-uart-logging |
 | S16-C | 串口抓取与完整放电实机验证 | pending | 2026-07-14-bq27220-battery-uart-logging |
 | S17-A | BQ27220有效SOC生成7%低电灯光保护状态 | completed | 2026-07-14-low-battery-led-cutoff |
 | S17-B | GP22/GP40统一渲染入口强制全黑并自动恢复 | completed | 2026-07-14-low-battery-led-cutoff |
 | S17-C | 8%/7%/3%/0%及充电恢复实机验证 | pending | 2026-07-14-low-battery-led-cutoff |
+| S18-A | BQ27220每2秒周期输出UART1四页快照 | completed | 2026-07-15-battery-uart-oled-sleep-icon |
+| S18-B | GP30/31/32活动时间戳与OLED 60秒休眠/输入唤醒 | completed | 2026-07-15-battery-uart-oled-sleep-icon |
+| S18-C | BUTTONS右上角四格电池图标和右下角百分比，并移除V/I/FCC诊断数值 | completed | 2026-07-15-battery-uart-oled-sleep-icon |
+| S18-D | 串口周期、OLED休眠唤醒与主页面实机验证 | pending | 2026-07-15-battery-uart-oled-sleep-icon |
+| S19-A | Battery Info层级0入口板级开关并默认隐藏 | completed | 2026-07-15-hide-battery-info-menu |
+| S19-B | Battery Info四页绘制与导航保留检查 | completed | 2026-07-15-hide-battery-info-menu |
+| S19-C | 层级0菜单顺序与调试入口恢复实机验证 | pending | 2026-07-15-hide-battery-info-menu |
+| S20-A | RGB亮度档位配置、默认值与持久化 | completed | 2026-07-15-rgb-brightness-levels |
+| S20-B | Brightness菜单、OLED标记与All OFF索引安全 | completed | 2026-07-15-rgb-brightness-levels |
+| S20-C | Key/Base指定六个效果分支应用三档亮度 | completed | 2026-07-15-rgb-brightness-levels |
+| S20-D | 配置、菜单和渲染路径静态验证 | completed | 2026-07-15-rgb-brightness-levels |
+| S20-E | 三档亮度、重启恢复和效果隔离实机验证 | pending | 2026-07-15-rgb-brightness-levels |
+| S22-A | GP24与VCC_5V/OVCC_3V3原理图供电范围核对 | completed | 2026-07-15-rgb-gp24-power-gating |
+| S22-B | All OFF与灯光模式选择共享电源请求状态 | completed | 2026-07-15-rgb-gp24-power-gating |
+| S22-C | 双灯链最终黑帧、GP24关断与上电延时 | completed | 2026-07-15-rgb-gp24-power-gating |
+| S22-D | GP24单写入点、菜单与低电路径静态验证 | completed | 2026-07-15-rgb-gp24-power-gating |
+| S22-E | 返工：All OFF后GP24仍为3.3V，复查运行路径与引脚接管 | in_progress | 2026-07-15-rgb-gp24-power-gating |

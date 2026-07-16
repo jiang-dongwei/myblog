@@ -6,8 +6,16 @@
 
 #include "pico/stdlib.h"
 
+#include <atomic>
+
 #ifndef SCROLLWHEEL_MENU_ENABLED
 #define SCROLLWHEEL_MENU_ENABLED 1
+#endif
+
+// Keep the Battery Info implementation compiled while allowing a board to
+// hide its level-0 entry during normal use. Set to 1 for gauge debugging.
+#ifndef SCROLLWHEEL_BATTERY_INFO_MENU_ENABLED
+#define SCROLLWHEEL_BATTERY_INFO_MENU_ENABLED 1
 #endif
 
 #ifndef SCROLLWHEEL_PIN_SW
@@ -48,7 +56,7 @@
 // ── Menu tree definition (shared between Core0 nav and Core1 render) ─────
 
 enum class SWMenuLevel : uint8_t {
-    MAIN          = 0,  // Level 0: RP2350, ESP32C6, Battery Info, RGB Customize
+    MAIN          = 0,  // Level 0: RP2350, ESP32C6, RGB Customize (+ optional Battery Info)
     RGB_SUB       = 1,  // Level 1: Button, ButtonEffect, AmbientEffect, OFF
     COLOR         = 2,  // Level 2: color names (Button RGB flash)
     INFO          = 3,  // Info pages (RP2350/ESP32C6)
@@ -59,6 +67,7 @@ enum class SWMenuLevel : uint8_t {
     COLOR_BTN_BREATH = 8, // Level 3: color picker under Button LED Effect -> Breathing
     COLOR_AMB_BREATH = 9, // Level 3: color picker under Ambient LED Effect -> Breathing
     BATTERY_INFO  = 10, // Battery runtime/config/calibration/charge pages
+    BRIGHTNESS    = 11, // Level 2: shared Key/Base effect brightness
 };
 
 static constexpr uint8_t SW_BATTERY_PAGE_COUNT = 4;
@@ -86,6 +95,9 @@ extern const uint8_t      kMenuButtonEffectsCount;
 
 extern const SWMenuItem kMenuAmbientEffects[];
 extern const uint8_t      kMenuAmbientEffectsCount;
+
+extern const SWMenuItem kMenuBrightness[];
+extern const uint8_t      kMenuBrightnessCount;
 
 // ── Cross-core state ─────────────────────────────────────────────────────
 
@@ -116,6 +128,9 @@ extern volatile bool g_scrollWheelButtonBusy;
 // when the button release follows a long press (menu enter or exit).
 extern volatile bool g_scrollWheelButtonLongPressed;
 
+// Last raw edge seen on GP30/GP31/GP32. Written by Core0 and read by Core1.
+extern std::atomic<uint32_t> g_scrollWheelLastActivityMs;
+
 // ── RGB color overrides set from the menu ───────────────────────────────
 // Each stores an AnimationStation `colors` vector index (0..15), or 0xFF
 // for "not set" (use default DIP cycling / white flash).
@@ -133,9 +148,18 @@ extern volatile uint8_t g_menuRgbTarget;
 
 // ── RGB effect overrides set from the menu ──────────────────────────────
 // 0xFF = not set (use default static color).
-// 0-5 = Fightpad-specific LED effect index.
+// Button uses 0-6; ambient uses 0-5.
 extern volatile uint8_t g_menuButtonEffect;   // GP22 button LED effect
 extern volatile uint8_t g_menuAmbientEffect;  // GP40 ambient LED effect
+
+// Runtime request for the shared GP22/GP40 RGB power rail.  The menu only
+// changes this request; FightpadAmbientLEDAddon remains the sole GP24 writer.
+// "All OFF" clears it and selecting a visible color/effect sets it again.
+extern volatile bool g_menuRgbPowerEnabled;
+
+// Shared brightness for Key/Base Static Color, Gradient and Rainbow.
+// 0 = Bright (0.5f), 1 = Normal (0.3f), 2 = Dim (0.1f).
+extern volatile uint8_t g_menuBrightnessLevel;
 
 // ── GPAddon (Core0) ──────────────────────────────────────────────────────
 
@@ -180,6 +204,7 @@ private:
     uint32_t  btnTimer         = 0;   // stage timer, reset on every transition
     bool      debouncedButton  = false; // 30ms-filtered signal (FSM reads ONLY this)
     bool      btnFromLong      = false; // true when DEBOUNCE_RELEASE originated from LONG
+    bool      prevButtonRaw    = false; // raw GP30 state for OLED activity/wake
 
     // Rotary edge detection
     bool prevA = false;

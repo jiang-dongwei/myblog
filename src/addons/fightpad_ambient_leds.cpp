@@ -1,6 +1,7 @@
 #include "addons/fightpad_ambient_leds.h"
 
 #include "addons/fightpad_bq27220_battery.h"
+#include "addons/scrollwheel_menu.h"
 
 #include "gamepad.h"
 #include "storagemanager.h"
@@ -24,6 +25,15 @@ static const RGB effectColors[] = {
     ColorBlue,      // 6: Blue breathing
     ColorPurple,    // 7: Purple breathing
 };
+
+static float getMenuEffectBrightness() {
+    switch (g_menuBrightnessLevel) {
+        case 1: return 0.3f;
+        case 2: return 0.1f;
+        case 0:
+        default: return 0.5f;
+    }
+}
 
 static void applySelectorState(uint8_t selector, bool& enabled, uint8_t& effectIndex) {
     constexpr uint8_t effectCount = sizeof(effectColors) / sizeof(effectColors[0]);
@@ -129,6 +139,7 @@ void FightpadAmbientLEDAddon::setup() {
         gpio_set_dir(FIGHTPAD12SLIM_BOOST_EN_PIN, GPIO_OUT);
         gpio_put(FIGHTPAD12SLIM_BOOST_EN_PIN, FIGHTPAD12SLIM_AMBIENT_BOOST_EN_LEVEL ? 1 : 0);
 #endif
+        boostPowerEnabled = true;
     }
 #endif
 
@@ -205,6 +216,8 @@ void FightpadAmbientLEDAddon::setup() {
 #if FIGHTPAD12SLIM_AMBIENT_DIP_SELECTOR_MODE
     lastSelector = lastControls & (CONTROL_ONOFF | CONTROL_PREV | CONTROL_NEXT);
     applySelectorState(lastSelector, enabled, effectIndex);
+#else
+    enabled = g_menuRgbPowerEnabled;
 #endif
 
     fightpadAmbientDiagEnabled = enabled ? 1 : 0;
@@ -230,6 +243,9 @@ void FightpadAmbientLEDAddon::setup() {
 void FightpadAmbientLEDAddon::process() {
     uint32_t now = getMillis();
     updateButtonFlash(now);
+#if !FIGHTPAD12SLIM_AMBIENT_DIP_SELECTOR_MODE
+    enabled = g_menuRgbPowerEnabled;
+#endif
     fightpadAmbientDiagEnabled = enabled ? 1 : 0;
     fightpadAmbientDiagEffect = effectIndex;
     fightpadAmbientDiagTicks++;
@@ -501,6 +517,7 @@ void FightpadAmbientLEDAddon::renderAmbient(uint32_t now) {
         : ColorWhite;
     LEDFormat fmt = static_cast<LEDFormat>(FIGHTPAD12SLIM_AMBIENT_LED_FORMAT);
     const uint8_t count = FIGHTPAD12SLIM_AMBIENT_LEDS_COUNT; // 19
+    const float effectBrightness = getMenuEffectBrightness();
 
     uint8_t effect = g_menuAmbientEffect;
     // 0xFF = never set by menu → use default static color.
@@ -510,7 +527,7 @@ void FightpadAmbientLEDAddon::renderAmbient(uint32_t now) {
     default:
     case 0: // AL_CUSTOM_EFFECT_STATIC_COLOR — fixed selected color
         {
-            uint32_t v = baseColor.value(fmt, 0.5f);
+            uint32_t v = baseColor.value(fmt, effectBrightness);
             for (int i = 0; i < count; i++) frame[i] = v;
         }
         break;
@@ -518,7 +535,7 @@ void FightpadAmbientLEDAddon::renderAmbient(uint32_t now) {
     case 1: // AL_CUSTOM_EFFECT_GRADIENT — all LEDs same shifting rainbow
         {
             RGB wc = RGB::wheel(static_cast<uint8_t>(wheelFrame));
-            uint32_t v = wc.value(fmt, 0.5f);
+            uint32_t v = wc.value(fmt, effectBrightness);
             for (int i = 0; i < count; i++) frame[i] = v;
 
             // Advance & bounce wheel
@@ -563,7 +580,9 @@ void FightpadAmbientLEDAddon::renderAmbient(uint32_t now) {
                 lastAmbientEffect = 3;
             }
             // Oscillate brightness (slow, smooth breathing)
-            const float breathSpeed = 0.008f;
+            // The peak is halved to 0.5f, so halve the step as well to keep
+            // the legacy breathing rhythm close to its previous speed.
+            const float breathSpeed = 0.004f;
             if (breathDimming) {
                 breathBrightness -= breathSpeed;
                 if (breathBrightness <= 0.0f) {
@@ -573,8 +592,8 @@ void FightpadAmbientLEDAddon::renderAmbient(uint32_t now) {
                 }
             } else {
                 breathBrightness += breathSpeed;
-                if (breathBrightness >= 1.0f) {
-                    breathBrightness = 1.0f;
+                if (breathBrightness >= 0.5f) {
+                    breathBrightness = 0.5f;
                     breathDimming = true;
                     breathColorCycle++;
                 }
@@ -604,7 +623,7 @@ void FightpadAmbientLEDAddon::renderAmbient(uint32_t now) {
                 uint8_t phase = static_cast<uint8_t>(
                     wheelFrame + ((i * 256U) / count));
                 RGB c = RGB::wheel(phase);
-                frame[i] = c.value(fmt, 0.5f);
+                frame[i] = c.value(fmt, effectBrightness);
             }
             // Advance & bounce wheel, matching Key Effect Rainbow.
             if (wheelReverse) {
@@ -645,8 +664,9 @@ void FightpadAmbientLEDAddon::renderButtons(uint32_t now) {
         : ColorWhite;
     LEDFormat fmt = static_cast<LEDFormat>(FIGHTPAD12SLIM_AMBIENT_LED_FORMAT);
     const uint8_t count = FIGHTPAD12SLIM_AMBIENT_GP22_LEDS_COUNT; // 12
+    const float effectBrightness = getMenuEffectBrightness();
 
-    uint32_t flashV = flashColor.value(fmt, 1.0f);
+    uint32_t flashV = flashColor.value(fmt, 0.8f);
 
     uint8_t effect = g_menuButtonEffect;
     // 0xFF = never set by menu → use default static color.
@@ -656,7 +676,7 @@ void FightpadAmbientLEDAddon::renderButtons(uint32_t now) {
     default:
     case 0: // EFFECT_STATIC_COLOR — fixed selected color + per-LED flash
         {
-            uint32_t baseV = baseColor.value(fmt, 0.5f);
+            uint32_t baseV = baseColor.value(fmt, effectBrightness);
             for (int i = 0; i < count; i++) {
                 frame_gp22[i] = (now < gp22FlashUntil[i]) ? flashV : baseV;
             }
@@ -669,7 +689,7 @@ void FightpadAmbientLEDAddon::renderButtons(uint32_t now) {
                 // Space LEDs across the color wheel
                 uint8_t phase = static_cast<uint8_t>(wheelFrame + i * 21);
                 RGB c = RGB::wheel(phase);
-                uint32_t baseV = c.value(fmt, 0.5f);
+                uint32_t baseV = c.value(fmt, effectBrightness);
                 frame_gp22[i] = (now < gp22FlashUntil[i]) ? flashV : baseV;
             }
             // Advance & bounce wheel
@@ -743,7 +763,7 @@ void FightpadAmbientLEDAddon::renderButtons(uint32_t now) {
     case 6: // EFFECT_GRADIENT — all LEDs same shifting rainbow + per-LED flash
         {
             RGB c = RGB::wheel(static_cast<uint8_t>(buttonGradientFrame));
-            uint32_t baseV = c.value(fmt, 0.5f);
+            uint32_t baseV = c.value(fmt, effectBrightness);
             for (int i = 0; i < count; i++) {
                 frame_gp22[i] = (now < gp22FlashUntil[i]) ? flashV : baseV;
             }
@@ -770,10 +790,22 @@ void FightpadAmbientLEDAddon::renderButtons(uint32_t now) {
 
 void FightpadAmbientLEDAddon::show() {
     // Final writer guard: setup/diagnostic paths can call show() without first
-    // passing through render().  Clear both chains here as well so no Base,
-    // Key, or Key Flash frame can bypass the <=7% battery cutoff.
-    if (FightpadBQ27220BatteryAddon::isLowBatteryLightCutoffActive()) {
+    // passing through render().  A disabled menu request and the <=7% battery
+    // cutoff both send one final black frame before GP24 is pulled inactive.
+    const bool outputEnabled = enabled &&
+        !FightpadBQ27220BatteryAddon::isLowBatteryLightCutoffActive();
+    if (!outputEnabled) {
         clearFrame();
+    }
+
+    // Once the rail is off there is nothing to transmit.  When a mode is
+    // selected again, power the RGB controller first and let its supply settle
+    // before the first restored frame is sent.
+    if (!boostPowerEnabled) {
+        if (!outputEnabled) {
+            return;
+        }
+        setBoostPower(true);
     }
 
     neopico.SetFrame(frame);
@@ -783,6 +815,51 @@ void FightpadAmbientLEDAddon::show() {
     neopico_gp22.Show();
 
     fightpadAmbientDiagShows++;
+
+    if (!outputEnabled) {
+#if FIGHTPAD12SLIM_AMBIENT_DRIVE_BOOST_EN && \
+    FIGHTPAD12SLIM_AMBIENT_POWER_GATE_WHEN_OFF && \
+    FIGHTPAD12SLIM_AMBIENT_BOOST_SHUTDOWN_DELAY_US > 0
+        // NeoPico::Show() blocks while filling the PIO FIFO, but the final few
+        // pixels can still be shifting.  Keep the rail alive long enough for
+        // both black frames and the WS2812 latch interval to complete.
+        sleep_us(FIGHTPAD12SLIM_AMBIENT_BOOST_SHUTDOWN_DELAY_US);
+#endif
+        setBoostPower(false);
+    }
+}
+
+void FightpadAmbientLEDAddon::setBoostPower(bool powerEnabled) {
+#if FIGHTPAD12SLIM_AMBIENT_DRIVE_BOOST_EN && FIGHTPAD12SLIM_AMBIENT_POWER_GATE_WHEN_OFF
+    if (FIGHTPAD12SLIM_AMBIENT_ENABLED && isValidPin(FIGHTPAD12SLIM_BOOST_EN_PIN)) {
+#if FIGHTPAD12SLIM_AMBIENT_BOOST_EXTERNAL_PULLUP
+        if (powerEnabled) {
+            gpio_set_dir(FIGHTPAD12SLIM_BOOST_EN_PIN, GPIO_IN);
+            gpio_disable_pulls(FIGHTPAD12SLIM_BOOST_EN_PIN);
+        } else {
+            gpio_put(FIGHTPAD12SLIM_BOOST_EN_PIN,
+                FIGHTPAD12SLIM_AMBIENT_BOOST_EN_LEVEL ? 0 : 1);
+            gpio_set_dir(FIGHTPAD12SLIM_BOOST_EN_PIN, GPIO_OUT);
+        }
+#else
+        gpio_put(FIGHTPAD12SLIM_BOOST_EN_PIN,
+            powerEnabled
+                ? (FIGHTPAD12SLIM_AMBIENT_BOOST_EN_LEVEL ? 1 : 0)
+                : (FIGHTPAD12SLIM_AMBIENT_BOOST_EN_LEVEL ? 0 : 1));
+#endif
+        boostPowerEnabled = powerEnabled;
+        if (powerEnabled) {
+#if FIGHTPAD12SLIM_AMBIENT_BOOST_STARTUP_DELAY_MS > 0
+            sleep_ms(FIGHTPAD12SLIM_AMBIENT_BOOST_STARTUP_DELAY_MS);
+#endif
+        }
+        return;
+    }
+#endif
+
+    // Boards without an independently controlled LED rail retain the original
+    // frame-only OFF behaviour.
+    boostPowerEnabled = true;
 }
 
 void FightpadAmbientLEDAddon::fill(RGB color, float brightness) {
@@ -797,12 +874,12 @@ void FightpadAmbientLEDAddon::fill(RGB color, float brightness) {
 }
 
 float FightpadAmbientLEDAddon::getBreathBrightness(uint32_t now) {
-    // Keep the breathing range wide enough to remain obvious on hardware.
+    // Keep the existing 2.4-second rhythm while limiting peak brightness.
     const uint32_t cycle_ms = 2400;
     uint32_t phase = now % cycle_ms;
     float phase_rad = (phase / (float)cycle_ms) * 2.0f * 3.14159265f;
     float sine_val = sinf(phase_rad);
-    float brightness = 0.5f + (sine_val * 0.5f);
+    float brightness = 0.25f + (sine_val * 0.25f);
 
     if (brightness < 0.02f) {
         brightness = 0.02f;

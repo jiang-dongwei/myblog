@@ -73,6 +73,8 @@ void DisplayAddon::setup() {
 
     displaySaverTimer = options.displaySaverTimeout;
     displaySaverTimeout = displaySaverTimer;
+    prevMillis = getMillis();
+    lastScrollWheelActivityMs = g_scrollWheelLastActivityMs.load(std::memory_order_acquire);
     configMode = DriverManager::getInstance().isConfigMode();
     turnOffWhenSuspended = options.turnOffWhenSuspended;
     displaySaverMode = options.displaySaverMode;
@@ -150,19 +152,35 @@ bool DisplayAddon::updateDisplayScreen() {
 bool DisplayAddon::isDisplayPowerOff()
 {
     Gamepad * gamepad = Storage::getInstance().GetGamepad();
+    const uint32_t now = getMillis();
 
     if (turnOffWhenSuspended && get_usb_suspended()) {
         if (displayIsPowerOn)
             setDisplayPower(0);
         return true;
-    } else {
-        if (!displayIsPowerOn)
-            setDisplayPower(1);
     }
+
+#if FIGHTPAD12SLIM_OLED_IDLE_SLEEP_ENABLED
+    const uint32_t activityMs = g_scrollWheelLastActivityMs.load(std::memory_order_acquire);
+    if (activityMs != lastScrollWheelActivityMs) {
+        lastScrollWheelActivityMs = activityMs;
+        displaySaverTimer = displaySaverTimeout;
+        prevMillis = now;
+    }
+
+    if ((now - activityMs) >= FIGHTPAD12SLIM_OLED_IDLE_SLEEP_TIMEOUT_MS) {
+        setDisplayPower(0);
+        prevMillis = now;
+        return true;
+    }
+#endif
+
+    if (!displayIsPowerOn)
+        setDisplayPower(1);
 
     if (!displaySaverTimeout) return false;
 
-    float diffTime = getMillis() - prevMillis;
+    float diffTime = now - prevMillis;
     displaySaverTimer -= diffTime;
     if (!!displaySaverTimeout && (gamepad->state.buttons || gamepad->state.dpad)) {
         displaySaverTimer = displaySaverTimeout;
@@ -178,7 +196,7 @@ bool DisplayAddon::isDisplayPowerOff()
         }
     }
 
-    prevMillis = getMillis();
+    prevMillis = now;
 
     return ((!!displaySaverTimeout && displaySaverTimer <= 0) && (displaySaverMode == DisplaySaverMode::DISPLAY_SAVER_DISPLAY_OFF));
 }
@@ -573,6 +591,8 @@ void DisplayAddon::drawScrollWheelMenu() {
             table = kMenuButtonEffects; count = kMenuButtonEffectsCount; break;
         case SWMenuLevel::AMBIENT_EFFECT:
             table = kMenuAmbientEffects; count = kMenuAmbientEffectsCount; break;
+        case SWMenuLevel::BRIGHTNESS:
+            table = kMenuBrightness; count = kMenuBrightnessCount; break;
         case SWMenuLevel::BATTERY_INFO:
             break;
         default: break;
@@ -602,6 +622,7 @@ void DisplayAddon::drawScrollWheelMenu() {
         case SWMenuLevel::COLOR_AMB_BREATH: activeVal = g_menuRgbBottom; break;
         case SWMenuLevel::BUTTON_EFFECT:  activeVal = g_menuButtonEffect;  break;
         case SWMenuLevel::AMBIENT_EFFECT: activeVal = g_menuAmbientEffect; break;
+        case SWMenuLevel::BRIGHTNESS:     activeVal = g_menuBrightnessLevel; break;
         default: break;
     }
 

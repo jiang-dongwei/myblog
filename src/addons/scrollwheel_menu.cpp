@@ -10,10 +10,16 @@
 
 // ── Menu data tables ─────────────────────────────────────────────────────
 
+static constexpr uint8_t RGB_SUB_KEY_FLASH_INDEX = 0;
+static constexpr uint8_t RGB_SUB_ALL_OFF_INDEX = 4;
+static constexpr uint8_t BRIGHTNESS_LEVEL_COUNT = 3;
+
 const SWMenuItem kMenuMain[] = {
     { "RP2350B FW Version", SWMenuLevel::INFO, 0 },
     { "ESP32C6 Status",     SWMenuLevel::INFO, 0 },
+#if SCROLLWHEEL_BATTERY_INFO_MENU_ENABLED
     { "Battery Info",       SWMenuLevel::BATTERY_INFO, 0 },
+#endif
     { "RGB Customize",      SWMenuLevel::RGB_SUB, 0 },
 };
 const uint8_t kMenuMainCount = sizeof(kMenuMain) / sizeof(kMenuMain[0]);
@@ -22,6 +28,7 @@ const SWMenuItem kMenuRgbSub[] = {
     { "Key Flash",           SWMenuLevel::COLOR,  0 },
     { "Key Effect",          SWMenuLevel::BUTTON_EFFECT,  0 },
     { "Base Effect",         SWMenuLevel::AMBIENT_EFFECT, 0 },
+    { "Brightness",          SWMenuLevel::BRIGHTNESS, 0 },
     { "All OFF",             SWMenuLevel::INFO,   0 },  // immediate action, no sub-level
 };
 const uint8_t kMenuRgbSubCount = sizeof(kMenuRgbSub) / sizeof(kMenuRgbSub[0]);
@@ -66,6 +73,13 @@ const SWMenuItem kMenuAmbientEffects[] = {
 };
 const uint8_t kMenuAmbientEffectsCount = sizeof(kMenuAmbientEffects) / sizeof(kMenuAmbientEffects[0]);
 
+const SWMenuItem kMenuBrightness[] = {
+    { "Bright", SWMenuLevel::INFO, 0 },
+    { "Normal", SWMenuLevel::INFO, 1 },
+    { "Dim",    SWMenuLevel::INFO, 2 },
+};
+const uint8_t kMenuBrightnessCount = sizeof(kMenuBrightness) / sizeof(kMenuBrightness[0]);
+
 // ── Cross-core state ─────────────────────────────────────────────────────
 
 volatile ScrollWheelMenuState g_menuState = { false, 0, 0, 0 };
@@ -73,12 +87,15 @@ volatile bool g_menuStateDirty = false;
 volatile bool g_scrollWheelMenuActive = false;
 volatile bool g_scrollWheelButtonBusy = false;
 volatile bool g_scrollWheelButtonLongPressed = false;
+std::atomic<uint32_t> g_scrollWheelLastActivityMs { 0 };
 volatile uint8_t g_menuRgbTop    = 0xFF;
 volatile uint8_t g_menuRgbBottom = 0xFF;
 volatile uint8_t g_menuRgbButton = 0xFF;
 volatile uint8_t g_menuRgbTarget = 0;
 volatile uint8_t g_menuButtonEffect  = 0xFF;
 volatile uint8_t g_menuAmbientEffect = 0xFF;
+volatile uint8_t g_menuBrightnessLevel = 0;
+volatile bool g_menuRgbPowerEnabled = true;
 
 // ── Pin helpers ──────────────────────────────────────────────────────────
 
@@ -114,6 +131,7 @@ void ScrollWheelMenuAddon::setup() {
     initPin(SCROLLWHEEL_PIN_B);
     initPin(SCROLLWHEEL_PIN_BACK);
 
+    prevButtonRaw = readPin(SCROLLWHEEL_PIN_SW);
     prevA = readPin(SCROLLWHEEL_PIN_A);
     prevB = readPin(SCROLLWHEEL_PIN_B);
     prevBack = readPin(SCROLLWHEEL_PIN_BACK);
@@ -128,6 +146,7 @@ void ScrollWheelMenuAddon::setup() {
     g_menuState.scrollOffset = 0;
     g_menuStateDirty = false;
     g_scrollWheelMenuActive = false;
+    g_scrollWheelLastActivityMs.store(getMillis(), std::memory_order_release);
 
     // Restore menu color overrides from flash (0xFF = never set).
     FightpadAmbientLEDOptions& opts = Storage::getInstance().getFightpadAmbientLEDOptions();
@@ -141,6 +160,19 @@ void ScrollWheelMenuAddon::setup() {
         g_menuButtonEffect = static_cast<uint8_t>(opts.buttonEffectIndex);
     if (opts.ambientEffectIndex != 0xFF)
         g_menuAmbientEffect = static_cast<uint8_t>(opts.ambientEffectIndex);
+    g_menuBrightnessLevel = (opts.brightnessLevel < BRIGHTNESS_LEVEL_COUNT)
+        ? static_cast<uint8_t>(opts.brightnessLevel)
+        : 0;
+
+    // "All OFF" is already persisted as three black colors plus default
+    // static effects.  Reconstruct the runtime rail request without changing
+    // the protobuf layout, so existing saved configurations stay compatible.
+    g_menuRgbPowerEnabled = !(
+        g_menuRgbTop == 0 &&
+        g_menuRgbBottom == 0 &&
+        g_menuRgbButton == 0 &&
+        g_menuButtonEffect == 0xFF &&
+        g_menuAmbientEffect == 0xFF);
 
     printf("[ScrollWheel] Setup OK. Pins: SW=%d A=%d B=%d\n",
            SCROLLWHEEL_PIN_SW, SCROLLWHEEL_PIN_A, SCROLLWHEEL_PIN_B);
@@ -160,6 +192,7 @@ const SWMenuItem* ScrollWheelMenuAddon::currentMenuTable() const {
                                              return kMenuColors;
         case SWMenuLevel::BUTTON_EFFECT:  return kMenuButtonEffects;
         case SWMenuLevel::AMBIENT_EFFECT: return kMenuAmbientEffects;
+        case SWMenuLevel::BRIGHTNESS:     return kMenuBrightness;
         case SWMenuLevel::BATTERY_INFO:   return kMenuMain;
         default:                          return kMenuMain;
     }
@@ -177,6 +210,7 @@ uint8_t ScrollWheelMenuAddon::currentItemCount() const {
                                              return kMenuColorsCount;
         case SWMenuLevel::BUTTON_EFFECT:  return kMenuButtonEffectsCount;
         case SWMenuLevel::AMBIENT_EFFECT: return kMenuAmbientEffectsCount;
+        case SWMenuLevel::BRIGHTNESS:     return kMenuBrightnessCount;
         case SWMenuLevel::BATTERY_INFO:   return SW_BATTERY_PAGE_COUNT;
         default:                          return kMenuMainCount;
     }
@@ -196,6 +230,7 @@ static void persistConfig() {
     opts.buttonFlashColorIndex = g_menuRgbButton;
     opts.buttonEffectIndex     = g_menuButtonEffect;
     opts.ambientEffectIndex    = g_menuAmbientEffect;
+    opts.brightnessLevel       = g_menuBrightnessLevel;
     EventManager::getInstance().triggerEvent(new GPStorageSaveEvent(false));
 }
 
@@ -212,6 +247,7 @@ static void clampScrollOffset() {
                                              count = kMenuColorsCount; break;
         case SWMenuLevel::BUTTON_EFFECT:  count = kMenuButtonEffectsCount; break;
         case SWMenuLevel::AMBIENT_EFFECT: count = kMenuAmbientEffectsCount; break;
+        case SWMenuLevel::BRIGHTNESS:     count = kMenuBrightnessCount; break;
         case SWMenuLevel::BATTERY_INFO:   count = SW_BATTERY_PAGE_COUNT; break;
         default: return;
     }
@@ -259,14 +295,28 @@ void ScrollWheelMenuAddon::navSelect() {
         return;
     }
 
-    // RGB_SUB "RGB OFF" (index 3): immediate action — turn off all LEDs.
+    // RGB_SUB "All OFF": immediate action — turn off all LEDs.
     // Reset colors to black and effects to default (Static Color).
-    if (currentLevel == SWMenuLevel::RGB_SUB && idx == 3) {
+    if (currentLevel == SWMenuLevel::RGB_SUB && idx == RGB_SUB_ALL_OFF_INDEX) {
         g_menuRgbTop    = 0;
         g_menuRgbBottom = 0;
         g_menuRgbButton = 0;
         g_menuButtonEffect  = 0xFF;
         g_menuAmbientEffect = 0xFF;
+        g_menuRgbPowerEnabled = false;
+        persistConfig();
+        markMenuDirty();
+        return;
+    }
+
+    // BRIGHTNESS is a terminal list. Apply and persist immediately, then stay
+    // on the list so the three levels can be compared in real time.
+    if (currentLevel == SWMenuLevel::BRIGHTNESS) {
+        const SWMenuItem* table = currentMenuTable();
+        uint8_t brightnessLevel = table[idx].targetIndex;
+        g_menuBrightnessLevel = (brightnessLevel < BRIGHTNESS_LEVEL_COUNT)
+            ? brightnessLevel
+            : 0;
         persistConfig();
         markMenuDirty();
         return;
@@ -285,6 +335,8 @@ void ScrollWheelMenuAddon::navSelect() {
             case 2: g_menuRgbButton = colorIdx; break;
             default: break;
         }
+        if (colorIdx != 0)
+            g_menuRgbPowerEnabled = true;
         // Stay in COLOR — do not navigate back.
         persistConfig();
         markMenuDirty();
@@ -298,6 +350,8 @@ void ScrollWheelMenuAddon::navSelect() {
         uint8_t colorIdx = table[idx].targetIndex;
         g_menuRgbTop       = colorIdx;
         g_menuButtonEffect = 0;               // enable Static Color effect
+        if (colorIdx != 0)
+            g_menuRgbPowerEnabled = true;
         persistConfig();
         markMenuDirty();
         return;
@@ -310,6 +364,8 @@ void ScrollWheelMenuAddon::navSelect() {
         uint8_t colorIdx = table[idx].targetIndex;
         g_menuRgbBottom      = colorIdx;
         g_menuAmbientEffect  = 0;             // enable Static Color effect
+        if (colorIdx != 0)
+            g_menuRgbPowerEnabled = true;
         persistConfig();
         markMenuDirty();
         return;
@@ -321,6 +377,8 @@ void ScrollWheelMenuAddon::navSelect() {
         uint8_t colorIdx = table[idx].targetIndex;
         g_menuRgbTop       = colorIdx;
         g_menuButtonEffect = 4;               // enable Breathing effect
+        if (colorIdx != 0)
+            g_menuRgbPowerEnabled = true;
         persistConfig();
         markMenuDirty();
         return;
@@ -332,6 +390,8 @@ void ScrollWheelMenuAddon::navSelect() {
         uint8_t colorIdx = table[idx].targetIndex;
         g_menuRgbBottom      = colorIdx;
         g_menuAmbientEffect  = 5;             // enable Breathing effect
+        if (colorIdx != 0)
+            g_menuRgbPowerEnabled = true;
         persistConfig();
         markMenuDirty();
         return;
@@ -357,6 +417,7 @@ void ScrollWheelMenuAddon::navSelect() {
                 if (effectIdx == 2)
                     g_menuRgbBottom = 0xFF; // Chase uses dynamic colors, not static color override.
             }
+            g_menuRgbPowerEnabled = true;
             persistConfig();
             markMenuDirty();
             return;
@@ -396,10 +457,13 @@ void ScrollWheelMenuAddon::navSelect() {
             mainIndex = idx;
         else if (currentLevel == SWMenuLevel::RGB_SUB) {
             rgbSubIndex = idx;
-            if (idx == 0) g_menuRgbTarget = 2;  // Button RGB → flash color
+            if (idx == RGB_SUB_KEY_FLASH_INDEX)
+                g_menuRgbTarget = 2;  // Button RGB → flash color
         }
         g_menuState.level = static_cast<uint8_t>(target);
-        g_menuState.index = 0;
+        g_menuState.index = (target == SWMenuLevel::BRIGHTNESS)
+            ? g_menuBrightnessLevel
+            : 0;
         g_menuState.scrollOffset = 0;
     }
     markMenuDirty();
@@ -450,6 +514,7 @@ void ScrollWheelMenuAddon::navBack() {
     case SWMenuLevel::COLOR:
     case SWMenuLevel::BUTTON_EFFECT:
     case SWMenuLevel::AMBIENT_EFFECT:
+    case SWMenuLevel::BRIGHTNESS:
         // Back to RGB_SUB without applying changes
         g_menuState.level = static_cast<uint8_t>(SWMenuLevel::RGB_SUB);
         g_menuState.index = rgbSubIndex;
@@ -513,6 +578,11 @@ void ScrollWheelMenuAddon::updateButton(uint32_t now) {
     bool raw = readPin(SCROLLWHEEL_PIN_SW);
     static bool    filterPrev  = false;
     static uint32_t filterStart = 0;
+
+    if (raw != prevButtonRaw) {
+        prevButtonRaw = raw;
+        g_scrollWheelLastActivityMs.store(now, std::memory_order_release);
+    }
 
     if (raw != filterPrev) {
         filterStart = now;
@@ -590,6 +660,10 @@ void ScrollWheelMenuAddon::process() {
     // GP31/GP32: simple edge detection for rotary navigation
     bool aRaw = readPin(SCROLLWHEEL_PIN_A);
     bool bRaw = readPin(SCROLLWHEEL_PIN_B);
+
+    if (aRaw != prevA || bRaw != prevB) {
+        g_scrollWheelLastActivityMs.store(now, std::memory_order_release);
+    }
 
     if (g_menuState.active) {
         // INFO pages display static text; there is no list to scroll.

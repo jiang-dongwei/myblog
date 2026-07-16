@@ -9,7 +9,7 @@
 
 namespace
 {
-    static constexpr uint8_t BATTERY_STATUS_COLUMN = 14;
+    static constexpr uint8_t BATTERY_STATUS_COLUMN = 12;
     static constexpr uint8_t BATTERY_ICON_X = 99;
     static constexpr uint8_t BATTERY_ICON_Y = 0;
     static constexpr uint8_t BATTERY_ICON_BODY_WIDTH = 27;
@@ -19,8 +19,8 @@ namespace
     static constexpr uint8_t BATTERY_CELL_WIDTH = 5;
     static constexpr uint8_t BATTERY_CELL_HEIGHT = 5;
     static constexpr uint8_t BATTERY_CELL_GAP = 1;
-    static constexpr uint8_t BATTERY_PERCENT_TEXT_COLUMN = 17;
-    static constexpr uint8_t BATTERY_PERCENT_TEXT_ROW = 7;
+    static constexpr uint8_t BATTERY_PERCENT_TEXT_COLUMN = 12;
+    static constexpr uint8_t BATTERY_PERCENT_TEXT_ROW = 0;
     static constexpr uint8_t BATTERY_PERCENT_PIXEL_X = BATTERY_PERCENT_TEXT_COLUMN * 6;
     static constexpr uint8_t BATTERY_PERCENT_PIXEL_Y = BATTERY_PERCENT_TEXT_ROW * 8;
     static constexpr uint8_t BATTERY_PERCENT_PIXEL_WIDTH = 26;
@@ -287,9 +287,10 @@ void ButtonLayoutScreen::init() {
         pushElement(currLayoutRight[elementCtr]);
     }
 
-	// start with profile mode displayed
-	bannerDisplay = true;
-    prevProfileNumber = -1;
+	// Start directly on the normal BUTTONS header. Profile changes that occur
+	// later still enable the temporary banner in update().
+	bannerDisplay = false;
+    prevProfileNumber = gamepad->getOptions().profileNumber;
 
     prevLayoutLeft = Storage::getInstance().getDisplayOptions().buttonLayout;
     prevLayoutRight = Storage::getInstance().getDisplayOptions().buttonLayoutRight;
@@ -331,6 +332,13 @@ void ButtonLayoutScreen::init() {
     showSocdMode = Storage::getInstance().getDisplayOptions().socdMode;
     showMacroMode = Storage::getInstance().getDisplayOptions().macroMode;
     showProfileMode = Storage::getInstance().getDisplayOptions().profileMode;
+
+#if FIGHTPAD12SLIM_BQ27220_ENABLED
+    // Keep the Fightpad12Slim header focused on the input mode and battery status.
+    showTurboMode = false;
+    showDpadMode = false;
+    showSocdMode = false;
+#endif
 
     getRenderer()->clearScreen();
 }
@@ -537,15 +545,7 @@ void ButtonLayoutScreen::drawScreen() {
             displayStatus.resize(BATTERY_STATUS_COLUMN);
         }
         getRenderer()->drawText(0, 0, displayStatus);
-
-        if (FightpadBQ27220BatteryAddon::isBatteryPercentValid()) {
-            drawFightpadBatteryIcon(getRenderer());
-        } else {
-            const std::string batteryDiagnostic = getFightpadBatteryDiagnosticText();
-            if (!batteryDiagnostic.empty()) {
-                getRenderer()->drawText(BATTERY_STATUS_COLUMN, 0, batteryDiagnostic);
-            }
-        }
+        drawFightpadBatteryIcon(getRenderer());
 #endif
 #else
         getRenderer()->drawText(0, 0, statusBar);
