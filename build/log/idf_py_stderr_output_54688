@@ -1,0 +1,17 @@
+[0;33m--- esp-idf-monitor 1.9.0 on /dev/ttyACM0 115200[0m
+[0;33m--- Quit: Ctrl+] | Menu: Ctrl+T | Help: Ctrl+T followed by Ctrl+H[0m
+[0;33m--- Warning: Failed to decode multiple lines in a row. Try checking the baud rate and XTAL frequency setting in menuconfig[0m
+[0;33m--- Stack dump detected[0m
+[0m--- 0x4080f65c: [0;33mvPortClearInterruptMaskFromISR[0m[0m at [0;32m/home/book/esp32/esp-idf/components/freertos/FreeRTOS-Kernel/portable/riscv/port.c[0m[0m:[1;31m519[0m
+[0m--- 0x4080f6c4: [0;33mvPortExitCritical[0m[0m at [0;32m/home/book/esp32/esp-idf/components/freertos/FreeRTOS-Kernel/portable/riscv/port.c[0m[0m:[1;31m623[0m
+[0m--- 0x40809b94: [0;33mr_ble_phy_disable[0m[0m at [0;32m??[0m[0m:[1;31m?[0m
+[0m--- 0x400208f0: [0;33msystimer_hal_set_alarm_target[0m[0m in [0;32mROM[0m
+[0m--- 0x40002e22: [0;33mrom_exit_critical_phy[0m[0m in [0;32mROM[0m
+[0m--- 0x40810ffc: [0;33mulTaskGenericNotifyTake[0m[0m at [0;32m/home/book/esp32/esp-idf/components/freertos/FreeRTOS-Kernel/tasks.c[0m[0m:[1;31m5686[0m
+[0m--- 0x4080f65c: [0;33mvPortClearInterruptMaskFromISR[0m[0m at [0;32m/home/book/esp32/esp-idf/components/freertos/FreeRTOS-Kernel/portable/riscv/port.c[0m[0m:[1;31m519[0m
+[0m--- 0x4080f6c4: [0;33mvPortExitCritical[0m[0m at [0;32m/home/book/esp32/esp-idf/components/freertos/FreeRTOS-Kernel/portable/riscv/port.c[0m[0m:[1;31m623[0m
+[0m--- 0x40809b94: [0;33mr_ble_phy_disable[0m[0m at [0;32m??[0m[0m:[1;31m?[0m
+[0m--- 0x400208f0: [0;33msystimer_hal_set_alarm_target[0m[0m in [0;32mROM[0m
+[0m--- 0x40002e22: [0;33mrom_exit_critical_phy[0m[0m in [0;32mROM[0m
+[0m--- 0x40810ffc: [0;33mulTaskGenericNotifyTake[0m[0m at [0;32m/home/book/esp32/esp-idf/components/freertos/FreeRTOS-Kernel/tasks.c[0m[0m:[1;31m5686[0m
+[0m

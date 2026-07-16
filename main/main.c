@@ -928,8 +928,8 @@ static void start_advertising(void)
     struct ble_gap_adv_params adv_params = {0};
     adv_params.conn_mode = BLE_GAP_CONN_MODE_UND;
     adv_params.disc_mode = BLE_GAP_DISC_MODE_GEN;
-    adv_params.itvl_min = BLE_GAP_ADV_ITVL_MS(30);
-    adv_params.itvl_max = BLE_GAP_ADV_ITVL_MS(50);
+    adv_params.itvl_min = BLE_GAP_ADV_ITVL_MS(100);
+    adv_params.itvl_max = BLE_GAP_ADV_ITVL_MS(200);
 
     rc = ble_gap_adv_start(s_own_addr_type, NULL, BLE_HS_FOREVER, &adv_params, gap_event, NULL);
     if (rc != 0) {

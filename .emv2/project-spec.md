@@ -32,3 +32,7 @@ ESP32-C6 独立 BLE HID 固件。从 UART0 (GPIO16/GPIO17) 接收外部输入状
 | S1-A | FW_INFO帧协议：多帧分包、flag/seq、CPU架构映射 | ✅ 已完成 |
 | S1-B | 固件信息采集+payload构建+app_main()集成+CMake宏 | ✅ 已完成 |
 | S1 | 读取固件信息(SDK/Plat/Board/CPU)，通过UART发送给RP2350 | ✅ 已完成 |
+| S2-A | CPU固定降频 160→80MHz (sdkconfig) | ✅ 已完成 |
+| S2-B | BLE广播间隔 30-50ms → 100-200ms | ✅ 已完成 |
+| S2-C | Auto Light Sleep + UART唤醒阈值 | ✅ 已完成 |
+| S2-D | GPIO13轮询改中断 + RTC唤醒 | ✅ 已完成 |

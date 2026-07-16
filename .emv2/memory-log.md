@@ -24,3 +24,26 @@
 - Plat: `CONFIG_IDF_TARGET` 编译宏
 - Board: `FW_INFO_BOARD_NAME` 宏 → `"Fightpad12Slim_C6_BLE_HID"`（规范化大小写）
 - CPU: `CONFIG_IDF_TARGET_ARCH_RISCV` → "RISC-V"
+
+---
+
+## 2026-07-15: S2 降低功耗 — 已规划
+
+- 步骤编号: S2 (S2-A + S2-B + S2-C + S2-D)
+- 讨论ID: 20260715-power-saving
+- 目标: 降低空闲/非连接状态功耗，不影响正常工作
+
+### 子步骤
+
+| 步骤 | 内容 | 优先级 |
+|------|------|--------|
+| S2-A | CPU 固定降频 160→80MHz (sdkconfig) | 1 |
+| S2-B | BLE 广播间隔 30-50ms → 100-200ms | 2 |
+| S2-C | Auto Light Sleep + FreeRTOS Tickless + UART 唤醒阈值 | 3 |
+| S2-D | GPIO13 轮询改中断 + RTC GPIO 唤醒 | 4 |
+
+### 关键决策
+- 固定降频到 80MHz（不做动态调频）
+- Light Sleep 只在空闲态生效，不影响 BLE 连接/广播
+- UART 唤醒阈值设 3 字节（防噪声）
+- GPIO13 从轮询改为下降沿中断，阻塞等待任务通知，零空闲唤醒

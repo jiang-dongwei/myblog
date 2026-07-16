@@ -1,0 +1,18 @@
+{
+  "discussion_id": "20260715-power-saving",
+  "created_at": "2026-07-15",
+  "current_phase": 5,
+  "phases": {
+    "split": "completed",
+    "requirements": "completed",
+    "hardware": "completed",
+    "brainstorm": "completed",
+    "milestones": "completed"
+  },
+  "subsystems": [
+    "CPU/SoC 电源管理",
+    "BLE 功耗优化",
+    "外设功耗管理",
+    "FreeRTOS Tickless Idle"
+  ]
+}

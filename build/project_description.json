@@ -1,7 +1,7 @@
 {
     "version":            "1.1",
     "project_name":       "fightpad12slim_c6_ble_hid",
-    "project_version":    "1",
+    "project_version":    "210fe3f-dirty",
     "project_path":       "/home/book/esp32/esp32c6_ble_hid_gamepad_test",
     "idf_path":           "/home/book/esp32/esp-idf",
     "build_dir":          "/home/book/esp32/esp32c6_ble_hid_gamepad_test/build",

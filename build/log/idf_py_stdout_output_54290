@@ -1,0 +1,63 @@
+[1/5] cd /home/book/esp32/esp32c6_ble_hid_gamepad_test/build/esp-idf/esptool_py && /home/book/.espressif/python_env/idf5.2_py3.10_env/bin/python /home/book/esp32/esp-idf/components/partition_table/check_sizes.py --offset 0x8000 partition --type app /home/book/esp32/esp32c6_ble_hid_gamepad_test/build/partition_table/partition-table.bin /home/book/esp32/esp32c6_ble_hid_gamepad_test/build/fightpad12slim_c6_ble_hid.bin
+fightpad12slim_c6_ble_hid.bin binary size 0x9d7a0 bytes. Smallest app partition is 0x100000 bytes. 0x62860 bytes (38%) free.
+[2/5] Performing build step for 'bootloader'
+[1/1] cd /home/book/esp32/esp32c6_ble_hid_gamepad_test/build/bootloader/esp-idf/esptool_py && /home/book/.espressif/python_env/idf5.2_py3.10_env/bin/python /home/book/esp32/esp-idf/components/partition_table/check_sizes.py --offset 0x8000 bootloader 0x0 /home/book/esp32/esp32c6_ble_hid_gamepad_test/build/bootloader/bootloader.bin
+Bootloader binary size 0x5160 bytes. 0x2ea0 bytes (36%) free.
+[2/3] cd /home/book/esp32/esp-idf/components/esptool_py && /usr/bin/cmake -D IDF_PATH=/home/book/esp32/esp-idf -D "SERIAL_TOOL=/home/book/.espressif/python_env/idf5.2_py3.10_env/bin/python;;/home/book/esp32/esp-idf/components/esptool_py/esptool/esptool.py;--chip;esp32c6" -D "SERIAL_TOOL_ARGS=--before=default_reset;--after=hard_reset;write_flash;@flash_args" -D WORKING_DIRECTORY=/home/book/esp32/esp32c6_ble_hid_gamepad_test/build -P /home/book/esp32/esp-idf/components/esptool_py/run_serial_tool.cmake
+esptool.py --chip esp32c6 -p /dev/ttyACM0 -b 460800 --before=default_reset --after=hard_reset write_flash --flash_mode dio --flash_freq 80m --flash_size 4MB 0x0 bootloader/bootloader.bin 0x10000 fightpad12slim_c6_ble_hid.bin 0x8000 partition_table/partition-table.bin
+esptool.py v4.11.0
+Serial port /dev/ttyACM0
+Connecting....
+Chip is ESP32-C6 (QFN40) (revision v0.2)
+Features: Wi-Fi 6, BT 5 (LE), IEEE802.15.4, Single Core + LP Core, 160MHz, Unknown Embedded Flash
+Crystal is 40MHz
+MAC: ac:eb:e6:ff:fe:d2:90:c4
+BASE MAC: ac:eb:e6:d2:90:c4
+MAC_EXT: ff:fe
+Uploading stub...
+Running stub...
+Stub running...
+Changing baud rate to 460800
+Changed.
+Configuring flash size...
+Flash will be erased from 0x00000000 to 0x00005fff...
+Flash will be erased from 0x00010000 to 0x000adfff...
+Flash will be erased from 0x00008000 to 0x00008fff...
+SHA digest in image updated
+Compressed 20832 bytes to 12917...
+Writing at 0x00000000... (100 %)
+Wrote 20832 bytes (12917 compressed) at 0x00000000 in 0.6 seconds (effective 287.7 kbit/s)...
+Hash of data verified.
+Compressed 645024 bytes to 368882...
+Writing at 0x00010000... (4 %)
+Writing at 0x0001c92d... (8 %)
+Writing at 0x00024661... (13 %)
+Writing at 0x0002ae17... (17 %)
+Writing at 0x00030ffe... (21 %)
+Writing at 0x0003869c... (26 %)
+Writing at 0x0004008b... (30 %)
+Writing at 0x00047754... (34 %)
+Writing at 0x0004e714... (39 %)
+Writing at 0x0005618a... (43 %)
+Writing at 0x0005d930... (47 %)
+Writing at 0x00063fcf... (52 %)
+Writing at 0x0006a831... (56 %)
+Writing at 0x00070bdd... (60 %)
+Writing at 0x00076a10... (65 %)
+Writing at 0x0007cef5... (69 %)
+Writing at 0x00082f30... (73 %)
+Writing at 0x000892fb... (78 %)
+Writing at 0x0008f2c4... (82 %)
+Writing at 0x00095464... (86 %)
+Writing at 0x0009b257... (91 %)
+Writing at 0x000a1fba... (95 %)
+Writing at 0x000a9172... (100 %)
+Wrote 645024 bytes (368882 compressed) at 0x00010000 in 8.9 seconds (effective 579.7 kbit/s)...
+Hash of data verified.
+Compressed 3072 bytes to 103...
+Writing at 0x00008000... (100 %)
+Wrote 3072 bytes (103 compressed) at 0x00008000 in 0.1 seconds (effective 486.5 kbit/s)...
+Hash of data verified.
+
+Leaving...
+Hard resetting via RTS pin...
