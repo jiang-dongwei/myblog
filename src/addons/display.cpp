@@ -162,13 +162,16 @@ bool DisplayAddon::isDisplayPowerOff()
 
 #if FIGHTPAD12SLIM_OLED_IDLE_SLEEP_ENABLED
     const uint32_t activityMs = g_scrollWheelLastActivityMs.load(std::memory_order_acquire);
+    const bool bluetoothWakeActive = bluetoothStatusActivityValid &&
+        (now - lastBluetoothStatusActivityMs) < FIGHTPAD12SLIM_OLED_IDLE_SLEEP_TIMEOUT_MS;
     if (activityMs != lastScrollWheelActivityMs) {
         lastScrollWheelActivityMs = activityMs;
         displaySaverTimer = displaySaverTimeout;
         prevMillis = now;
     }
 
-    if ((now - activityMs) >= FIGHTPAD12SLIM_OLED_IDLE_SLEEP_TIMEOUT_MS) {
+    if (!bluetoothWakeActive &&
+        (now - activityMs) >= FIGHTPAD12SLIM_OLED_IDLE_SLEEP_TIMEOUT_MS) {
         setDisplayPower(0);
         prevMillis = now;
         return true;
@@ -224,9 +227,53 @@ void DisplayAddon::setMenuMappings()
 }
 
 void DisplayAddon::process() {
-    // If GPDisplay is not loaded or we're in standard mode with display power off enabled
-    if (gpDisplay->getDriver() == nullptr ||
-        (!configMode && isDisplayPowerOff())) {
+    if (gpDisplay->getDriver() == nullptr) {
+        return;
+    }
+
+    const uint32_t now = getMillis();
+    FightpadESP32BluetoothStatusEvent bluetoothEvent = {};
+    const bool hasBluetoothEvent = getFightpadESP32BluetoothStatusEvent(bluetoothEvent);
+    if (hasBluetoothEvent && bluetoothEvent.sequence != lastBluetoothStatusSequence) {
+        lastBluetoothStatusSequence = bluetoothEvent.sequence;
+        lastBluetoothStatusActivityMs = now;
+        bluetoothStatusActivityValid = true;
+        displaySaverTimer = displaySaverTimeout;
+        prevMillis = now;
+    }
+
+    const bool bluetoothOverlayActive = hasBluetoothEvent &&
+        isFightpadESP32BluetoothStatusEventActive(bluetoothEvent, now);
+
+    // A Bluetooth transition is a temporary overlay, not a display-mode or
+    // scrollwheel-menu transition.  It can wake a sleeping OLED, and removing
+    // the overlay naturally reveals the exact page that was active before it.
+    if (!bluetoothOverlayActive && !configMode && isDisplayPowerOff()) {
+        return;
+    }
+
+    if (bluetoothOverlayActive) {
+        setDisplayPower(1);
+        gpDisplay->clearScreen();
+        gpDisplay->drawText(2, 2, "Bluetooth Status");
+
+        switch (bluetoothEvent.status) {
+        case FightpadESP32BluetoothStatus::Connecting:
+            gpDisplay->drawText(4, 4, "Connecting...");
+            break;
+        case FightpadESP32BluetoothStatus::Connected:
+            gpDisplay->drawText(6, 4, "Connected");
+            break;
+        case FightpadESP32BluetoothStatus::Pairing:
+            gpDisplay->drawText(5, 4, "Pairing...");
+            break;
+        case FightpadESP32BluetoothStatus::Disconnected:
+        default:
+            gpDisplay->drawText(4, 4, "Disconnected");
+            break;
+        }
+
+        gpDisplay->render();
         return;
     }
 

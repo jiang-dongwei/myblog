@@ -363,11 +363,11 @@ void DisplayAddon::process() {
 |------|------|------|
 | GP00-GP01 | I2C0 (OLED) | SDA=GP00, SCL=GP01 |
 | GP02-GP20 | 手柄按键 | UP/DOWN/LEFT/RIGHT/B1-B4/L1-L2/R1-R2/L3/R3/S1/S2/A1/A2/TURBO |
-| GP21 | VBUS 检测 | ESP32 电池路径 |
+| GP21 | VBUS 检测 | ESP32 电池帧的外部供电状态 |
 | GP22 | WS2812 按键灯 | 12 颗 LED，GRB 格式 |
 | GP23 | 板载状态 LED | 模式指示 |
 | GP24 | 5V Boost 使能 | LED 供电轨 |
-| GP25-GP27 | BQ27220 电池 | SCL/SDA/GPOUT (软件 I2C) |
+| GP25-GP27 | BQ27220 电池 | SCL/SDA/GPOUT (软件 I2C)，OLED 与 ESP32 共用 SOC |
 | GP28-GP29 | PIO-USB 扩展 | USB 设备直通 |
 | **GP30** | **编码器按键 + DIP ON/OFF** | 长短按复用 |
 | **GP31** | **编码器 A 相 + DIP PREV** | 旋转+效果切换复用 |
@@ -475,7 +475,7 @@ render():
 - 发送紧凑手柄输入帧（10ms 间隔）
 - 发送电池状态帧
 - 发送传输模式帧
-- 支持 VBUS 检测和电池 ADC 采样
+- 电量百分比复用 OLED 的 BQ27220 SOC；VBUS 与 GP41 ADC 仅作附加诊断
 
 **帧格式**: 魔数头 + 类型 + Payload（自定义紧凑二进制协议）
 

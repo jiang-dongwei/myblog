@@ -58,7 +58,7 @@ Enter RP2350 BOOTSEL mode using the board recovery path/test pad, then copy the 
 | GP18 | HOME | `BUTTON_PRESS_A1` | Button |
 | GP19 | BACK / Share | `BUTTON_PRESS_A2` | Button |
 | GP20 | TURBO | `BUTTON_PRESS_TURBO` | Button |
-| GP21 | VBUS-present sense | `ASSIGNED_TO_ADDON` | Read by the ESP32 proxy battery path to detect external USB power |
+| GP21 | VBUS-present sense | `ASSIGNED_TO_ADDON` | Reported in the ESP32 battery frame as external-power status |
 | GP22 | Button WS2812 data | `ASSIGNED_TO_ADDON` + `BOARD_LEDS_PIN = 22` | Workbook says 12 LEDs |
 | GP23 | Power / status LED | `BOARD_LED_PIN = 23`, `BOARD_LED_ENABLED = 1` | Confirm on hardware |
 | GP24 | 5V RGB-rail boost enable | `ASSIGNED_TO_ADDON` + ambient LED addon | High while RGB output is active; low after a final black frame when RGB is off |
@@ -98,7 +98,7 @@ The Fightpad-specific ambient LED addon owns both WS2812 outputs: the 19-LED GP4
 
 - `FP`: buttons low/high, D-pad bitmask, signed X/Y axes, and an XOR checksum. Input frames are sent every 10 ms, or sooner when the input state changes, only while GP33 selects BT-HID.
 - `FT`: runtime BT transport enable state from GP33.
-- `FB`: battery status from RP2350, carrying percent, VBUS-present state, raw ADC sample, and checksum. RP2350 samples GP41 (VBAT divider on ADC1) and GP21 (USB_VBUS-present divider), then the ESP32-C6 updates its BLE HID battery level characteristic.
+- `FB`: battery status from RP2350, carrying percent, VBUS-present state, raw ADC sample, and checksum. Percent comes from the same BQ27220 SOC snapshot shown on the OLED; GP21 and GP41 remain supplemental power/ADC diagnostics. The ESP32-C6 uses the percent field for its BLE HID battery level characteristic.
 
 GP33 is the runtime transport switch. High selects USB-HID and stops the ESP input feed after sending one neutral frame. Low selects BT-HID and keeps the USB HID endpoint enumerated but neutral so a connected USB host cannot retain a stale pressed-button report.
 
@@ -114,7 +114,7 @@ The first line follows the configured BQ27220 boot delay, then output uses `FIGH
 
 ## OLED Battery Gauge and Idle Sleep
 
-The BUTTONS page keeps the normal button viewer and shows the BQ27220 numeric SOC immediately to the left of the four-cell battery icon in the upper-right corner. It does not overlay voltage, current, or FCC diagnostics. The four Battery Info debug pages are available from the level-0 menu through `SCROLLWHEEL_BATTERY_INFO_MENU_ENABLED=1`.
+The BUTTONS page keeps the normal button viewer and shows the BQ27220 numeric SOC immediately to the left of the four-cell battery icon in the upper-right corner. It does not overlay voltage, current, or FCC diagnostics. The four Battery Info debug pages remain compiled, but their level-0 entry is hidden by `SCROLLWHEEL_BATTERY_INFO_MENU_ENABLED=0`; set it to `1` to restore the entry for gauge debugging.
 
 Core0 records every raw edge on GP30, GP31, or GP32. When no edge has been seen for 60 seconds, the Core1 display addon powers off the SSD1306 and skips further frame rendering. The first new edge powers the OLED back on immediately and is still processed normally by the scrollwheel/menu input logic. GP19 BACK does not reset this dedicated inactivity timer.
 
@@ -130,9 +130,9 @@ This feature uses the same final-black-frame sequence and then disables the GP24
 
 - `Fightpad12Slim.cmake` uses the local `fightpad12slim.h` board header for RP2350B, GP23 status LED, and W25Q128JVSI 16 MiB flash metadata. Confirm with `picotool info` on hardware.
 - The `22-FIGHTPAD_20260625-schematic_new.pdf` schematic shows GPIO24/`5V_EN` driving only the FP6276 `VCC_5V` boost rail used by the RGB chains; RP2350 and ESP32 use the independent 3.3V rail. Hardware validation should still confirm that GP22/GP40 stay low while the 5V rail is off and that no board revision routes another load from `VCC_5V`.
-- The workbook Pinout sheet now assigns `VBAT_SENSE_PIN = 41`, labels GP41 as ADC1, and describes VBAT routed to GP41. Stale workbook text still marks GP27 as ADC1 and mentions GP41 BT pairing. The schematic/RP2350B pinout is treated as authoritative: battery sampling is GP41 / ADC1.
+- The workbook Pinout sheet now assigns `VBAT_SENSE_PIN = 41`, labels GP41 as ADC1, and describes VBAT routed to GP41. Stale workbook text still marks GP27 as ADC1 and mentions GP41 BT pairing. The schematic/RP2350B pinout is treated as authoritative: GP41 / ADC1 is retained as raw diagnostic telemetry, while BQ27220 SOC is the trusted percentage source.
 - `LEDS_BUTTON_*` and ambient LED ordering are intentionally not finalized. The workbook says 18 ambient LEDs, while the schematic labels extend through `LED_19`; confirm physical count and chain order on hardware.
-- ESP32-C6 update flow through RP2350 is still follow-up work. BLE battery UI now uses RP2350 GP41 ADC sampling plus GP21 VBUS detection and is forwarded over the runtime UART link.
+- ESP32-C6 update flow through RP2350 is still follow-up work. BLE battery UI now uses the BQ27220 SOC shared with the OLED; GP41 ADC sampling and GP21 VBUS detection are forwarded only as supplemental runtime telemetry.
 - The battery snapshot logger owns UART1. The planned GP36-GP39 ESP32-C6 BT HCI link cannot be enabled at the same time without moving one function to another UART or PIO implementation.
 
 ## References

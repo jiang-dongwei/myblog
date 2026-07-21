@@ -64,8 +64,10 @@ namespace
     static constexpr uint8_t BQ27220_SHORT_MAC_DATA_LENGTH = 0x06;
     static constexpr uint16_t I2C_SCL_HIGH_TIMEOUT_US = 10000;
     static constexpr uint16_t I2C_BUS_FREE_DELAY_US = 80;
+    static constexpr uint16_t BATTERY_PERCENT_SNAPSHOT_VALID = 0x0100;
     bool batteryPercentValid = false;
     uint8_t batteryPercent = 0;
+    std::atomic<uint16_t> batteryPercentSnapshot { 0 };
     uint8_t batteryLevelBars = 0;
     std::atomic_bool batteryLowLightCutoffActive { false };
     bool batteryVoltageValid = false;
@@ -152,6 +154,7 @@ void FightpadBQ27220BatteryAddon::setup()
 {
     batteryPercentValid = false;
     batteryPercent = 0;
+    batteryPercentSnapshot.store(0, std::memory_order_release);
     batteryLevelBars = 0;
     batteryLowLightCutoffActive.store(false, std::memory_order_release);
     batteryVoltageValid = false;
@@ -217,6 +220,7 @@ void FightpadBQ27220BatteryAddon::process()
 #endif
 
     batteryPercentValid = false;
+    batteryPercentSnapshot.store(0, std::memory_order_release);
     batteryVoltageValid = false;
     batteryCurrentValid = false;
     batteryAverageCurrentValid = false;
@@ -229,6 +233,9 @@ void FightpadBQ27220BatteryAddon::process()
         batteryPercent = percent;
         batteryLevelBars = percentToBars(percent);
         batteryPercentValid = true;
+        batteryPercentSnapshot.store(
+            BATTERY_PERCENT_SNAPSHOT_VALID | percent,
+            std::memory_order_release);
         batteryLowLightCutoffActive.store(
             percent <= FIGHTPAD12SLIM_BQ27220_LIGHTS_OFF_PERCENT,
             std::memory_order_release);
@@ -398,12 +405,25 @@ void FightpadBQ27220BatteryAddon::logBatterySnapshot()
 
 bool FightpadBQ27220BatteryAddon::isBatteryPercentValid()
 {
-    return batteryPercentValid;
+    return (batteryPercentSnapshot.load(std::memory_order_acquire) &
+            BATTERY_PERCENT_SNAPSHOT_VALID) != 0;
 }
 
 uint8_t FightpadBQ27220BatteryAddon::getBatteryPercent()
 {
-    return batteryPercent;
+    return static_cast<uint8_t>(
+        batteryPercentSnapshot.load(std::memory_order_acquire) & 0x00FF);
+}
+
+bool FightpadBQ27220BatteryAddon::getBatteryPercentSnapshot(uint8_t& percent)
+{
+    const uint16_t snapshot = batteryPercentSnapshot.load(std::memory_order_acquire);
+    if ((snapshot & BATTERY_PERCENT_SNAPSHOT_VALID) == 0) {
+        return false;
+    }
+
+    percent = static_cast<uint8_t>(snapshot & 0x00FF);
+    return true;
 }
 
 uint8_t FightpadBQ27220BatteryAddon::getBatteryLevelBars()

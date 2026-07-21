@@ -246,6 +246,8 @@ public:
 
     static bool isBatteryPercentValid();
     static uint8_t getBatteryPercent();
+    // Returns one coherent SOC snapshot for readers on the other core.
+    static bool getBatteryPercentSnapshot(uint8_t& percent);
     static uint8_t getBatteryLevelBars();
     static bool isLowBatteryLightCutoffActive();
     static bool isBatteryVoltageValid();

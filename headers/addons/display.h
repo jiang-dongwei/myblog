@@ -247,6 +247,9 @@ private:
     uint32_t displaySaverTimeout = 0;
     int32_t displaySaverTimer;
     uint32_t lastScrollWheelActivityMs = 0;
+    uint32_t lastBluetoothStatusSequence = 0;
+    uint32_t lastBluetoothStatusActivityMs = 0;
+    bool bluetoothStatusActivityValid = false;
     uint8_t displayIsPowerOn = 1;
     uint32_t prevMillis;
     std::string statusBar;

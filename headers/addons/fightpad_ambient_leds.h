@@ -198,6 +198,7 @@ private:
     void nextEffect();
     void render(uint32_t now);
     void renderAmbient(uint32_t now);   // GP40 19-LED chain effects
+    void renderBluetoothStatusAmbient(uint8_t status, uint32_t elapsedMs);
     void renderButtons(uint32_t now);   // GP22 12-LED chain effects
     void show();
     void setBoostPower(bool powerEnabled);
@@ -221,6 +222,9 @@ private:
     bool enabled = FIGHTPAD12SLIM_AMBIENT_BOOT_ENABLE != 0;
     // True is also the safe fallback for boards without a controllable rail.
     bool boostPowerEnabled = true;
+    // Connecting/Pairing/Connected can temporarily request GP40 power even
+    // when the saved RGB mode is All OFF. Low-battery cutoff still wins.
+    bool bluetoothStatusLightRequired = false;
 
     // ── Effect animation state ──────────────────────────────
     int16_t  wheelFrame = 0;          // rainbow color wheel position (0-255, signed for bounce)

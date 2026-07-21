@@ -1,6 +1,7 @@
 #include "addons/fightpad_ambient_leds.h"
 
 #include "addons/fightpad_bq27220_battery.h"
+#include "addons/fightpad_esp32_proxy.h"
 #include "addons/scrollwheel_menu.h"
 
 #include "gamepad.h"
@@ -448,6 +449,7 @@ void FightpadAmbientLEDAddon::nextEffect() {
 }
 
 void FightpadAmbientLEDAddon::render(uint32_t now) {
+    bluetoothStatusLightRequired = false;
     clearFrame();
 
     // Low-battery protection is a transient render override.  It does not
@@ -457,7 +459,27 @@ void FightpadAmbientLEDAddon::render(uint32_t now) {
         return;
     }
 
-    if (!enabled) {
+    FightpadESP32BluetoothStatusEvent bluetoothEvent = {};
+    const bool bluetoothStatusActive =
+        getFightpadESP32BluetoothStatusEvent(bluetoothEvent) &&
+        isFightpadESP32BluetoothStatusEventActive(bluetoothEvent, now);
+
+    if (!enabled && !bluetoothStatusActive) {
+        return;
+    }
+
+    // Bluetooth status is a transient GP40-only render override.  It does not
+    // alter menu/Flash values or the normal Base animation state.  GP22 keeps
+    // rendering normally when RGB is enabled and remains black during All OFF.
+    if (bluetoothStatusActive) {
+        renderBluetoothStatusAmbient(
+            static_cast<uint8_t>(bluetoothEvent.status),
+            now - bluetoothEvent.receivedAtMs);
+        bluetoothStatusLightRequired =
+            bluetoothEvent.status != FightpadESP32BluetoothStatus::Disconnected;
+        if (enabled) {
+            renderButtons(now);
+        }
         return;
     }
 
@@ -488,6 +510,43 @@ void FightpadAmbientLEDAddon::render(uint32_t now) {
     // ── Normal render path ──────────────────────────────────────────────
     renderAmbient(now);
     renderButtons(now);
+}
+
+void FightpadAmbientLEDAddon::renderBluetoothStatusAmbient(
+    uint8_t statusValue,
+    uint32_t elapsedMs)
+{
+    const auto status = static_cast<FightpadESP32BluetoothStatus>(statusValue);
+    LEDFormat fmt = static_cast<LEDFormat>(FIGHTPAD12SLIM_AMBIENT_LED_FORMAT);
+    const uint8_t count = FIGHTPAD12SLIM_AMBIENT_LEDS_COUNT;
+
+    switch (status) {
+    case FightpadESP32BluetoothStatus::Connecting:
+    case FightpadESP32BluetoothStatus::Pairing:
+        {
+            const uint8_t chasePixel = static_cast<uint8_t>((elapsedMs / 200U) % count);
+            static const float gradient[5] = {0.05f, 0.25f, 0.80f, 0.25f, 0.05f};
+            for (uint8_t i = 0; i < 5; i++) {
+                const uint8_t index = static_cast<uint8_t>((chasePixel + i) % count);
+                frame[index] = ColorBlue.value(fmt, gradient[i]);
+            }
+        }
+        break;
+
+    case FightpadESP32BluetoothStatus::Connected:
+        {
+            const uint32_t value = ColorBlue.value(fmt, getMenuEffectBrightness());
+            for (uint8_t i = 0; i < count; i++) {
+                frame[i] = value;
+            }
+        }
+        break;
+
+    case FightpadESP32BluetoothStatus::Disconnected:
+    default:
+        // clearFrame() already made the Base chain black.
+        break;
+    }
 }
 
 // ── Ambient LED effects (GP40, 19 LEDs) ───────────────────────────────
@@ -792,7 +851,7 @@ void FightpadAmbientLEDAddon::show() {
     // Final writer guard: setup/diagnostic paths can call show() without first
     // passing through render().  A disabled menu request and the <=7% battery
     // cutoff both send one final black frame before GP24 is pulled inactive.
-    const bool outputEnabled = enabled &&
+    const bool outputEnabled = (enabled || bluetoothStatusLightRequired) &&
         !FightpadBQ27220BatteryAddon::isLowBatteryLightCutoffActive();
     if (!outputEnabled) {
         clearFrame();

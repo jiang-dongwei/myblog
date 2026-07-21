@@ -92,6 +92,11 @@
 - 功能: RGB Customize 增加 Brightness，可用 Bright/Normal/Dim 三档同时控制 Key/Base 的 Static Color、Gradient、Rainbow，并持久化当前档位
 - 讨论ID: `2026-07-15-rgb-brightness-levels`
 
+### 蓝牙连接状态弹窗与 Base 灯效
+- 物理硬件: 复用 RP2350B UART0 GP44/GP45、SSD1306 OLED、GP40 的 19 颗 Base LED 和 GP24 RGB 电源门控
+- 功能: 接收 ESP32-C6 `0x46 0x53` 状态帧，自动显示 Pairing/Connecting/Connected/Disconnected 页面，并用临时蓝色 Chase、全蓝或全黑 Base 灯效反馈连接状态后无损恢复
+- 讨论ID: `2026-07-20-bluetooth-status-popup-led`
+
 ## 开发步骤状态
 
 | 步骤 | 描述 | 状态 | 讨论ID |
@@ -166,3 +171,8 @@
 | S22-C | 双灯链最终黑帧、GP24关断与上电延时 | completed | 2026-07-15-rgb-gp24-power-gating |
 | S22-D | GP24单写入点、菜单与低电路径静态验证 | completed | 2026-07-15-rgb-gp24-power-gating |
 | S22-E | 返工：All OFF后GP24仍为3.3V，复查运行路径与引脚接管 | in_progress | 2026-07-15-rgb-gp24-power-gating |
+| S23-A | UART `0x53` 状态帧解析与跨核事件快照 | completed | 2026-07-20-bluetooth-status-popup-led |
+| S23-B | OLED 蓝牙状态临时覆盖页与休眠唤醒 | completed | 2026-07-20-bluetooth-status-popup-led |
+| S23-C | GP40 蓝色 Chase/静态/关闭临时覆盖与原灯效恢复 | completed | 2026-07-20-bluetooth-status-popup-led |
+| S23-D | 协议、显示、灯效和优先级非编译静态验证 | completed | 2026-07-20-bluetooth-status-popup-led |
+| S23-E | Pairing/Connecting成功或失败、All OFF、休眠和低电实机验证 | pending | 2026-07-20-bluetooth-status-popup-led |

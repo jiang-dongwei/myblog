@@ -49,11 +49,11 @@
 //   GP30..32  -> ambient-light controls
 //   GP40      -> WS2812 ambient/border RGB chain (LED_1)
 // Reserved / follow-up hardware:
-//   GP21      -> VBUS-present sense used by the ESP32 proxy battery path
+//   GP21      -> VBUS-present status reported in the ESP32 battery frame
 //   GP25..27  -> BQ27220 battery gauge: SCL/SDA/GPOUT
 //   GP33      -> USB/BT HID transport switch
 //   GP34/GP35 -> ESP32-C6 optional EN/boot control
-//   GP41      -> battery sampling / VBAT divider (RP2350B ADC1) used by the ESP32 proxy battery path
+//   GP41      -> VBAT divider (RP2350B ADC1), retained as raw ESP32-frame diagnostics
 //   GP42/GP43 -> BQ27220 4-second battery telemetry UART1 TX/RX
 //   GP44/GP45 -> ESP32-C6 UART0 TX/RX bridge pins
 //   GP46/GP47 -> currently free, but locked in v1 until high-GPIO mapping is audited
@@ -170,7 +170,7 @@
 #define FIGHTPAD12SLIM_AMBIENT_POWER_GATE_WHEN_OFF 1
 #define FIGHTPAD12SLIM_AMBIENT_BOOST_STARTUP_DELAY_MS 5
 #define FIGHTPAD12SLIM_AMBIENT_BOOST_SHUTDOWN_DELAY_US 1000
-#define SCROLLWHEEL_BATTERY_INFO_MENU_ENABLED 1 // Show the four-page battery debug menu at level 0.
+#define SCROLLWHEEL_BATTERY_INFO_MENU_ENABLED 0 // Hide the level-0 entry; set to 1 to restore the four-page debug menu.
 #define FIGHTPAD12SLIM_AMBIENT_POWER_ONLY_DIAGNOSTIC 0
 #define FIGHTPAD12SLIM_AMBIENT_GP22_LOOPBACK_DIAGNOSTIC 0
 #define FIGHTPAD12SLIM_AMBIENT_CONTROL_DIAGNOSTIC 0
@@ -193,7 +193,8 @@
 #define FIGHTPAD12SLIM_TRANSPORT_BT_LEVEL 1
 
 // ESP32-C6 BT-HID runtime link: RP2350 UART0 on GP44/GP45 sends compact
-// gamepad input frames to the ESP32-C6 when GP33 selects BT. USB CDC exposure
+// gamepad input frames to the ESP32-C6 when GP33 selects BT. ESP32-C6 sends
+// 0x46/0x49 firmware-info and 0x46/0x53 Bluetooth-status frames back. USB CDC
 // stays disabled so WebConfig RNDIS keeps its original USB class behavior.
 #define FIGHTPAD12SLIM_ESP32_PROXY_ENABLED 1
 #define FIGHTPAD12SLIM_ESP32_PROXY_UART uart0
@@ -211,6 +212,7 @@
 #define FIGHTPAD12SLIM_ESP32_PROXY_CDC_DESC_ENABLED 0
 #define FIGHTPAD12SLIM_ESP32_PROXY_INPUT_REPORT_ENABLED 1
 #define FIGHTPAD12SLIM_ESP32_PROXY_INPUT_REPORT_INTERVAL_MS 10
+#define FIGHTPAD12SLIM_ESP32_BT_STATUS_RESULT_MS 1000
 #define FIGHTPAD12SLIM_ESP32_PROXY_TRANSPORT_DIAGNOSTIC_PIN 23
 
 // BQ27220 battery gauge (software I2C: GP25=SCL, GP26=SDA, GP27=GPOUT)

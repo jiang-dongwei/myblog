@@ -76,6 +76,10 @@
 #define FIGHTPAD12SLIM_ESP32_FW_INFO_TIMEOUT_MS 200
 #endif
 
+#ifndef FIGHTPAD12SLIM_ESP32_BT_STATUS_RESULT_MS
+#define FIGHTPAD12SLIM_ESP32_BT_STATUS_RESULT_MS 1000
+#endif
+
 #ifndef FIGHTPAD12SLIM_ESP32_FW_INFO_SDK_SIZE
 #define FIGHTPAD12SLIM_ESP32_FW_INFO_SDK_SIZE 24
 #endif
@@ -131,22 +135,6 @@
 #define FIGHTPAD12SLIM_ESP32_PROXY_BATTERY_INTERVAL_MS 1000
 #endif
 
-#ifndef FIGHTPAD12SLIM_ESP32_PROXY_BATTERY_EMPTY_MV
-#define FIGHTPAD12SLIM_ESP32_PROXY_BATTERY_EMPTY_MV 3300
-#endif
-
-#ifndef FIGHTPAD12SLIM_ESP32_PROXY_BATTERY_FULL_MV
-#define FIGHTPAD12SLIM_ESP32_PROXY_BATTERY_FULL_MV 4200
-#endif
-
-#ifndef FIGHTPAD12SLIM_ESP32_PROXY_BATTERY_FILTER_SHIFT
-#define FIGHTPAD12SLIM_ESP32_PROXY_BATTERY_FILTER_SHIFT 3
-#endif
-
-#ifndef FIGHTPAD12SLIM_ESP32_PROXY_BATTERY_PERCENT_HYSTERESIS
-#define FIGHTPAD12SLIM_ESP32_PROXY_BATTERY_PERCENT_HYSTERESIS 2
-#endif
-
 #define FightpadESP32ProxyName "FightpadESP32Proxy"
 
 struct FightpadESP32FirmwareInfo {
@@ -160,6 +148,27 @@ struct FightpadESP32FirmwareInfo {
 // Core1 uses this function to obtain one complete copy of the information
 // parsed and published by the Core0 UART addon.
 bool getFightpadESP32FirmwareInfo(FightpadESP32FirmwareInfo& info);
+
+enum class FightpadESP32BluetoothStatus : uint8_t {
+    Disconnected = 0x00,
+    Connecting = 0x01,
+    Connected = 0x02,
+    Pairing = 0x03,
+};
+
+struct FightpadESP32BluetoothStatusEvent {
+    bool valid = false;
+    FightpadESP32BluetoothStatus status = FightpadESP32BluetoothStatus::Disconnected;
+    uint32_t receivedAtMs = 0;
+    uint32_t sequence = 0;
+};
+
+// Core0 publishes each valid status frame.  Core0 lighting and Core1 display
+// both use the receive timestamp so their transient indication ends together.
+bool getFightpadESP32BluetoothStatusEvent(FightpadESP32BluetoothStatusEvent& event);
+bool isFightpadESP32BluetoothStatusEventActive(
+    const FightpadESP32BluetoothStatusEvent& event,
+    uint32_t now);
 
 class FightpadESP32ProxyAddon : public GPAddon {
 public:
@@ -196,10 +205,12 @@ private:
     void drainBufferToUart();
     void drainUartToBuffer();
     void drainBufferToCdc();
-    void checkFirmwareInfoTimeout();
-    void feedFirmwareInfoByte(uint8_t value);
-    void resyncFirmwareInfoFrame();
+    void checkIncomingFrameTimeout();
+    void feedIncomingFrameByte(uint8_t value);
+    void resyncIncomingFrame();
+    void handleIncomingFrame(const uint8_t frame[8]);
     void handleFirmwareInfoFrame(const uint8_t frame[8]);
+    void handleBluetoothStatusFrame(const uint8_t frame[8]);
     void resetFirmwareInfoSequence();
     bool appendFirmwareInfoPayload(const uint8_t payload[4]);
     bool parseFirmwareInfoPayload();
@@ -215,8 +226,6 @@ private:
     bool batteryMonitoringSupported() const;
     bool readVbusPresent() const;
     uint16_t sampleBatteryAdcRaw() const;
-    uint16_t convertBatteryRawToMillivolts(uint16_t raw) const;
-    uint8_t mapBatteryMillivoltsToPercent(uint16_t millivolts) const;
 
     RingBuffer cdcToUart;
     RingBuffer uartToCdc;
@@ -233,13 +242,13 @@ private:
     bool lastDtr = false;
     bool lastRts = false;
     bool initialized = false;
-    uint8_t firmwareInfoFrame[8] = {};
-    uint8_t firmwareInfoFrameLength = 0;
+    uint8_t incomingFrame[8] = {};
+    uint8_t incomingFrameLength = 0;
     uint8_t firmwareInfoPayload[FIGHTPAD12SLIM_ESP32_FW_INFO_PAYLOAD_SIZE] = {};
     uint16_t firmwareInfoPayloadLength = 0;
     uint8_t firmwareInfoExpectedSeq = 0;
     bool firmwareInfoSequenceActive = false;
-    uint32_t firmwareInfoLastByteTimeMs = 0;
+    uint32_t incomingFrameLastByteTimeMs = 0;
     uint32_t firmwareInfoLastFrameTimeMs = 0;
     uint32_t turboPinMask = 0;
     uint32_t lastInputReportTimeMs = 0;
@@ -253,8 +262,6 @@ private:
     uint8_t lastBatteryPercent = 0;
     bool lastBatteryPercentValid = false;
     bool lastBatteryVbusPresent = false;
-    uint16_t lastBatteryMillivolts = 0;
-    bool lastBatteryMillivoltsValid = false;
 };
 
 #endif

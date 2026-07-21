@@ -537,3 +537,29 @@ Base Effect 和 Key Effect 都需要同时提供两个呼吸灯入口：
 - 当前无新增串口日志，后续检查All OFF请求传播、实际板级宏和GP24最后写入者。
 - 根因核对：build目录的ELF/UF2为16:22旧产物，相关OBJ为16:21；GP24门控源码在17:57至18:04才修改，旧ELF也没有新门控符号。
 - 当前不再改动门控状态机；等待用户重新构建、确认UF2时间戳更新并烧录后复测。
+
+## 2026-07-20: 蓝牙连接状态弹窗与 Base 灯效 (S23)
+
+### 需求与决策
+
+- ESP32-C6 通过 UART0 发送固定 8 字节 `0x46 0x53` 蓝牙状态帧，Byte0~6 XOR，状态为 Disconnected/Connecting/Connected/Pairing。
+- Connecting/Pairing 立即唤醒 OLED 并持续覆盖当前页面；Connected/Disconnected 显示 1000ms，随后恢复弹窗前页面而不改变显示模式或拨轮菜单状态。
+- GP40 Base 在 Connecting/Pairing 时显示纯蓝 5 灯 Chase，Connected 时全蓝静态 1000ms，Disconnected 时全黑 1000ms；GP22 Key 灯保持原行为。
+- 临时灯效不修改菜单或 Flash 配置，可在 All OFF 时临时唤醒 GP24；BQ27220 `SOC <= 7%` 低电保护仍保持最高优先级。
+- `0x00` 无法区分连接失败和普通断连，统一显示 `Disconnected`；Connecting/Pairing 不增加 RP2350 侧超时。
+
+### 实现记录
+
+- 将固件信息专用 UART 同步器扩展为统一 8 字节接收器，识别 `0x49` 和 `0x53`，统一完成滑动同步和 XOR 后按类型分发。
+- 合法状态事件通过独立 critical section 发布状态、接收时间和序号，供 Core0 灯效与 Core1 OLED 使用；非法状态或坏校验不更新快照。
+- `DisplayAddon::process()` 增加高优先级 `Bluetooth Status` 覆盖页，新事件会唤醒 OLED 并刷新休眠计时，结果到期后自然恢复原页面。
+- `FightpadAmbientLEDAddon` 在低电检查之后、普通渲染之前生成 GP40 临时帧；蓝色 Chase 使用事件时间计算位置，不写原 Base 动画变量。
+- 最终 `show()` 将 Connecting/Pairing/Connected 作为临时供电请求，Disconnected 不请求点亮；低电最终写入拦截保持不变。
+- 新增 `docs/bluetooth_status_protocol_rp2350.md`，记录帧、状态、时序、OLED 和 Base 灯效行为。
+- 四种帧 XOR 静态结果为 `0x15/0x14/0x17/0x16`；非法状态和坏校验用例通过，`0x49`/`0x53` 分发、21列 OLED、GP22 隔离、无持久化写入、All OFF 和低电优先级检查通过。
+- 协议增补 `0x03 Pairing` 后，OLED 显示 `Pairing...`，GP40 沿用纯蓝 Chase，直到下一状态帧；启动期 ASCII `C6_DONE\n` 由二进制同步器安全忽略，不增加运行时动作。
+- `git diff --check` 通过；按仓库约定未运行编译，S23-E 等待用户构建烧录和实机验证。
+
+### 讨论ID
+
+`2026-07-20-bluetooth-status-popup-led`

@@ -1,0 +1,20 @@
+{
+  "discussion_id": "2026-07-20-bluetooth-status-popup-led",
+  "created_at": "2026-07-20",
+  "current_phase": 5,
+  "phases": {
+    "split": "completed",
+    "requirements": "completed",
+    "hardware": "completed",
+    "brainstorm": "completed",
+    "milestones": "completed"
+  },
+  "subsystems": [
+    "UART 状态帧接收",
+    "跨核状态事件",
+    "OLED 临时状态页",
+    "GP40 Base 临时灯效",
+    "验证"
+  ],
+  "current_subsystem": 0
+}

@@ -536,9 +536,9 @@ void ScrollWheelMenuAddon::navBack() {
         markMenuDirty();
         break;
     case SWMenuLevel::COLOR_BTN_BREATH:
-        // Back to BUTTON_EFFECT (Breathing = index 1)
+        // Back to BUTTON_EFFECT (Breathing = index 2)
         g_menuState.level = static_cast<uint8_t>(SWMenuLevel::BUTTON_EFFECT);
-        g_menuState.index = 1;
+        g_menuState.index = 2;
         g_menuState.scrollOffset = 0;
         markMenuDirty();
         break;

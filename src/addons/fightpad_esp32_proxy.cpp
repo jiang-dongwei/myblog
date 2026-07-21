@@ -1,4 +1,5 @@
 #include "addons/fightpad_esp32_proxy.h"
+#include "addons/fightpad_bq27220_battery.h"
 
 #include "helper.h"
 #include "storagemanager.h"
@@ -7,7 +8,6 @@
 #include "hardware/sync.h"
 #include "pico/critical_section.h"
 
-#include <algorithm>
 #include <cstring>
 
 namespace {
@@ -16,6 +16,7 @@ constexpr uint8_t kFrameMagicReport = 0x50;
 constexpr uint8_t kFrameMagicTransport = 0x54;
 constexpr uint8_t kFrameMagicBattery = 0x42;
 constexpr uint8_t kFrameMagicFirmwareInfo = 0x49;
+constexpr uint8_t kFrameMagicBluetoothStatus = 0x53;
 constexpr uint8_t kFrameLength = 8;
 constexpr uint8_t kFirmwareInfoFlagMask = 0xC0;
 constexpr uint8_t kFirmwareInfoSeqMask = 0x3F;
@@ -23,14 +24,13 @@ constexpr uint8_t kFirmwareInfoFlagSingle = 0x00;
 constexpr uint8_t kFirmwareInfoFlagLast = 0x40;
 constexpr uint8_t kFirmwareInfoFlagMiddle = 0x80;
 constexpr uint8_t kFirmwareInfoFlagFirst = 0xC0;
-constexpr uint16_t kAdcFullScale = 4095;
 constexpr uint16_t kBatterySampleCount = 8;
-constexpr float kBatteryDividerScale = 2.0f;
-constexpr float kBatteryAdcReferenceMv = 3300.0f;
 
 FightpadESP32FirmwareInfo firmwareInfoSnapshot = {};
 critical_section_t firmwareInfoCriticalSection = {};
 volatile uint32_t firmwareInfoSnapshotVersion = 0;
+FightpadESP32BluetoothStatusEvent bluetoothStatusSnapshot = {};
+critical_section_t bluetoothStatusCriticalSection = {};
 
 bool firmwareInfoKeyMatches(const uint8_t *key, size_t keyLength, const char *expected)
 {
@@ -65,6 +65,16 @@ void publishFirmwareInfo(const FightpadESP32FirmwareInfo& info)
     firmwareInfoSnapshotVersion++;
     critical_section_exit(&firmwareInfoCriticalSection);
 }
+
+void publishBluetoothStatus(FightpadESP32BluetoothStatus status)
+{
+    critical_section_enter_blocking(&bluetoothStatusCriticalSection);
+    bluetoothStatusSnapshot.valid = true;
+    bluetoothStatusSnapshot.status = status;
+    bluetoothStatusSnapshot.receivedAtMs = getMillis();
+    bluetoothStatusSnapshot.sequence++;
+    critical_section_exit(&bluetoothStatusCriticalSection);
+}
 }
 
 static FightpadESP32ProxyAddon *activeProxy = nullptr;
@@ -87,6 +97,35 @@ bool getFightpadESP32FirmwareInfo(FightpadESP32FirmwareInfo& info)
     return versionBefore == versionAfter &&
            (versionAfter & 1u) == 0 &&
            info.valid;
+}
+
+bool getFightpadESP32BluetoothStatusEvent(FightpadESP32BluetoothStatusEvent& event)
+{
+    event = {};
+    if (!critical_section_is_initialized(&bluetoothStatusCriticalSection)) {
+        return false;
+    }
+
+    critical_section_enter_blocking(&bluetoothStatusCriticalSection);
+    event = bluetoothStatusSnapshot;
+    critical_section_exit(&bluetoothStatusCriticalSection);
+    return event.valid;
+}
+
+bool isFightpadESP32BluetoothStatusEventActive(
+    const FightpadESP32BluetoothStatusEvent& event,
+    uint32_t now)
+{
+    if (!event.valid) {
+        return false;
+    }
+
+    if (event.status == FightpadESP32BluetoothStatus::Connecting ||
+        event.status == FightpadESP32BluetoothStatus::Pairing) {
+        return true;
+    }
+
+    return (now - event.receivedAtMs) < FIGHTPAD12SLIM_ESP32_BT_STATUS_RESULT_MS;
 }
 
 #ifndef FIGHTPAD12SLIM_ESP32_PROXY_TRANSPORT_DIAGNOSTIC_PIN
@@ -148,6 +187,9 @@ void FightpadESP32ProxyAddon::setup()
 
     if (!critical_section_is_initialized(&firmwareInfoCriticalSection)) {
         critical_section_init(&firmwareInfoCriticalSection);
+    }
+    if (!critical_section_is_initialized(&bluetoothStatusCriticalSection)) {
+        critical_section_init(&bluetoothStatusCriticalSection);
     }
 
     if (isValidPin(FIGHTPAD12SLIM_TRANSPORT_SEL_PIN)) {
@@ -214,7 +256,7 @@ void FightpadESP32ProxyAddon::process()
         return;
     }
 
-    checkFirmwareInfoTimeout();
+    checkIncomingFrameTimeout();
 
 #if FIGHTPAD12SLIM_ESP32_PROXY_CDC_DESC_ENABLED
     drainCdcToBuffer();
@@ -242,12 +284,11 @@ void FightpadESP32ProxyAddon::postprocess(bool sent)
 void FightpadESP32ProxyAddon::reinit()
 {
     refreshTurboPinMask();
-    firmwareInfoFrameLength = 0;
+    incomingFrameLength = 0;
     resetFirmwareInfoSequence();
     lastInputReportValid = false;
     lastTransportModeValid = false;
     lastBatteryPercentValid = false;
-    lastBatteryMillivoltsValid = false;
 }
 
 void FightpadESP32ProxyAddon::setUsbLineState(bool dtr, bool rts)
@@ -380,7 +421,7 @@ void FightpadESP32ProxyAddon::drainUartToBuffer()
 {
     while (uart_is_readable(uart)) {
         uint8_t value = uart_getc(uart);
-        feedFirmwareInfoByte(value);
+        feedIncomingFrameByte(value);
 
 #if FIGHTPAD12SLIM_ESP32_PROXY_CDC_DESC_ENABLED && CFG_TUD_CDC
         if (!uartToCdc.full()) {
@@ -427,13 +468,13 @@ void FightpadESP32ProxyAddon::drainBufferToCdc()
 #endif
 }
 
-void FightpadESP32ProxyAddon::checkFirmwareInfoTimeout()
+void FightpadESP32ProxyAddon::checkIncomingFrameTimeout()
 {
     uint32_t now = getMillis();
 
-    if (firmwareInfoFrameLength > 0 &&
-        (now - firmwareInfoLastByteTimeMs) >= FIGHTPAD12SLIM_ESP32_FW_INFO_TIMEOUT_MS) {
-        firmwareInfoFrameLength = 0;
+    if (incomingFrameLength > 0 &&
+        (now - incomingFrameLastByteTimeMs) >= FIGHTPAD12SLIM_ESP32_FW_INFO_TIMEOUT_MS) {
+        incomingFrameLength = 0;
     }
 
     if (firmwareInfoSequenceActive &&
@@ -442,61 +483,63 @@ void FightpadESP32ProxyAddon::checkFirmwareInfoTimeout()
     }
 }
 
-void FightpadESP32ProxyAddon::feedFirmwareInfoByte(uint8_t value)
+void FightpadESP32ProxyAddon::feedIncomingFrameByte(uint8_t value)
 {
     uint32_t now = getMillis();
 
-    if (firmwareInfoFrameLength == 0) {
+    if (incomingFrameLength == 0) {
         if (value == kFrameMagic0) {
-            firmwareInfoFrame[0] = value;
-            firmwareInfoFrameLength = 1;
-            firmwareInfoLastByteTimeMs = now;
+            incomingFrame[0] = value;
+            incomingFrameLength = 1;
+            incomingFrameLastByteTimeMs = now;
         }
         return;
     }
 
-    if (firmwareInfoFrameLength == 1) {
-        if (value == kFrameMagicFirmwareInfo) {
-            firmwareInfoFrame[1] = value;
-            firmwareInfoFrameLength = 2;
-            firmwareInfoLastByteTimeMs = now;
+    if (incomingFrameLength == 1) {
+        if (value == kFrameMagicFirmwareInfo || value == kFrameMagicBluetoothStatus) {
+            incomingFrame[1] = value;
+            incomingFrameLength = 2;
+            incomingFrameLastByteTimeMs = now;
         } else if (value == kFrameMagic0) {
-            firmwareInfoFrame[0] = value;
-            firmwareInfoLastByteTimeMs = now;
+            incomingFrame[0] = value;
+            incomingFrameLastByteTimeMs = now;
         } else {
-            firmwareInfoFrameLength = 0;
+            incomingFrameLength = 0;
         }
         return;
     }
 
-    firmwareInfoFrame[firmwareInfoFrameLength++] = value;
-    firmwareInfoLastByteTimeMs = now;
-    if (firmwareInfoFrameLength < kFrameLength) {
+    incomingFrame[incomingFrameLength++] = value;
+    incomingFrameLastByteTimeMs = now;
+    if (incomingFrameLength < kFrameLength) {
         return;
     }
 
     uint8_t checksum = 0;
     for (uint8_t i = 0; i < kFrameLength - 1; i++) {
-        checksum ^= firmwareInfoFrame[i];
+        checksum ^= incomingFrame[i];
     }
 
-    if (checksum == firmwareInfoFrame[kFrameLength - 1]) {
-        handleFirmwareInfoFrame(firmwareInfoFrame);
-        firmwareInfoFrameLength = 0;
+    if (checksum == incomingFrame[kFrameLength - 1]) {
+        handleIncomingFrame(incomingFrame);
+        incomingFrameLength = 0;
         return;
     }
 
-    resetFirmwareInfoSequence();
-    resyncFirmwareInfoFrame();
+    if (incomingFrame[1] == kFrameMagicFirmwareInfo) {
+        resetFirmwareInfoSequence();
+    }
+    resyncIncomingFrame();
 }
 
-void FightpadESP32ProxyAddon::resyncFirmwareInfoFrame()
+void FightpadESP32ProxyAddon::resyncIncomingFrame()
 {
     uint8_t preservedStart = kFrameLength;
     uint8_t preservedLength = 0;
 
     for (uint8_t i = 1; i < kFrameLength; i++) {
-        if (firmwareInfoFrame[i] != kFrameMagic0) {
+        if (incomingFrame[i] != kFrameMagic0) {
             continue;
         }
 
@@ -506,7 +549,8 @@ void FightpadESP32ProxyAddon::resyncFirmwareInfoFrame()
             break;
         }
 
-        if (firmwareInfoFrame[i + 1] == kFrameMagicFirmwareInfo) {
+        if (incomingFrame[i + 1] == kFrameMagicFirmwareInfo ||
+            incomingFrame[i + 1] == kFrameMagicBluetoothStatus) {
             preservedStart = i;
             preservedLength = kFrameLength - i;
             break;
@@ -514,12 +558,35 @@ void FightpadESP32ProxyAddon::resyncFirmwareInfoFrame()
     }
 
     if (preservedLength > 0) {
-        std::memmove(firmwareInfoFrame, firmwareInfoFrame + preservedStart, preservedLength);
-        firmwareInfoFrameLength = preservedLength;
-        firmwareInfoLastByteTimeMs = getMillis();
+        std::memmove(incomingFrame, incomingFrame + preservedStart, preservedLength);
+        incomingFrameLength = preservedLength;
+        incomingFrameLastByteTimeMs = getMillis();
     } else {
-        firmwareInfoFrameLength = 0;
+        incomingFrameLength = 0;
     }
+}
+
+void FightpadESP32ProxyAddon::handleIncomingFrame(const uint8_t frame[8])
+{
+    switch (frame[1]) {
+    case kFrameMagicFirmwareInfo:
+        handleFirmwareInfoFrame(frame);
+        break;
+    case kFrameMagicBluetoothStatus:
+        handleBluetoothStatusFrame(frame);
+        break;
+    default:
+        break;
+    }
+}
+
+void FightpadESP32ProxyAddon::handleBluetoothStatusFrame(const uint8_t frame[8])
+{
+    if (frame[2] > static_cast<uint8_t>(FightpadESP32BluetoothStatus::Pairing)) {
+        return;
+    }
+
+    publishBluetoothStatus(static_cast<FightpadESP32BluetoothStatus>(frame[2]));
 }
 
 void FightpadESP32ProxyAddon::handleFirmwareInfoFrame(const uint8_t frame[8])
@@ -760,56 +827,6 @@ uint16_t FightpadESP32ProxyAddon::sampleBatteryAdcRaw() const
     return (uint16_t)((total + (kBatterySampleCount / 2)) / kBatterySampleCount);
 }
 
-uint16_t FightpadESP32ProxyAddon::convertBatteryRawToMillivolts(uint16_t raw) const
-{
-    float adcMillivolts = ((float)raw * kBatteryAdcReferenceMv) / kAdcFullScale;
-    float batteryMillivolts = adcMillivolts * kBatteryDividerScale;
-    if (batteryMillivolts < 0.0f) {
-        return 0;
-    }
-
-    return (uint16_t)(batteryMillivolts + 0.5f);
-}
-
-uint8_t FightpadESP32ProxyAddon::mapBatteryMillivoltsToPercent(uint16_t millivolts) const
-{
-    if (millivolts <= FIGHTPAD12SLIM_ESP32_PROXY_BATTERY_EMPTY_MV) {
-        return 0;
-    }
-    if (millivolts >= FIGHTPAD12SLIM_ESP32_PROXY_BATTERY_FULL_MV) {
-        return 100;
-    }
-
-    struct BatteryPoint {
-        uint16_t millivolts;
-        uint8_t percent;
-    };
-
-    static constexpr BatteryPoint batteryCurve[] = {
-        {3300, 0},
-        {3500, 10},
-        {3650, 25},
-        {3750, 45},
-        {3850, 65},
-        {3950, 80},
-        {4100, 95},
-        {4200, 100},
-    };
-
-    for (size_t i = 1; i < sizeof(batteryCurve) / sizeof(batteryCurve[0]); i++) {
-        if (millivolts <= batteryCurve[i].millivolts) {
-            const BatteryPoint &low = batteryCurve[i - 1];
-            const BatteryPoint &high = batteryCurve[i];
-            uint32_t rangeMv = high.millivolts - low.millivolts;
-            uint32_t deltaMv = millivolts - low.millivolts;
-            uint32_t rangePercent = high.percent - low.percent;
-            return (uint8_t)(low.percent + ((deltaMv * rangePercent) / rangeMv));
-        }
-    }
-
-    return 100;
-}
-
 void FightpadESP32ProxyAddon::sendBatteryStatusFrame(bool force)
 {
     if (!initialized || !batteryMonitoringSupported()) {
@@ -824,35 +841,13 @@ void FightpadESP32ProxyAddon::sendBatteryStatusFrame(bool force)
         return;
     }
 
+    uint8_t batteryPercent = 0;
+    if (!FightpadBQ27220BatteryAddon::getBatteryPercentSnapshot(batteryPercent)) {
+        return;
+    }
+
     bool vbusPresent = readVbusPresent();
     uint16_t adcRaw = sampleBatteryAdcRaw();
-    uint16_t batteryMillivolts = convertBatteryRawToMillivolts(adcRaw);
-
-    if (!vbusPresent) {
-        if (!lastBatteryMillivoltsValid || force) {
-            lastBatteryMillivolts = batteryMillivolts;
-            lastBatteryMillivoltsValid = true;
-        } else {
-            uint32_t filtered = ((uint32_t)lastBatteryMillivolts * ((1u << FIGHTPAD12SLIM_ESP32_PROXY_BATTERY_FILTER_SHIFT) - 1u)) + batteryMillivolts;
-            lastBatteryMillivolts = (uint16_t)(filtered >> FIGHTPAD12SLIM_ESP32_PROXY_BATTERY_FILTER_SHIFT);
-        }
-
-        batteryMillivolts = lastBatteryMillivolts;
-    } else {
-        lastBatteryMillivolts = batteryMillivolts;
-        lastBatteryMillivoltsValid = true;
-    }
-
-    uint8_t batteryPercent = vbusPresent ? 100 : mapBatteryMillivoltsToPercent(batteryMillivolts);
-
-    if (!vbusPresent && lastBatteryPercentValid && lastBatteryVbusPresent == vbusPresent) {
-        uint8_t delta = (uint8_t)std::max<int>(
-            batteryPercent > lastBatteryPercent ? batteryPercent - lastBatteryPercent : lastBatteryPercent - batteryPercent,
-            0);
-        if (delta <= FIGHTPAD12SLIM_ESP32_PROXY_BATTERY_PERCENT_HYSTERESIS) {
-            batteryPercent = lastBatteryPercent;
-        }
-    }
 
     bool changed = !lastBatteryPercentValid ||
                    lastBatteryPercent != batteryPercent ||
@@ -1025,3 +1020,4 @@ extern "C" void tud_cdc_line_coding_cb(uint8_t itf, cdc_line_coding_t const *lin
     }
 }
 #endif
+
