@@ -1,0 +1,14 @@
+{
+  "discussion_id": "20260720-directed-adv-sleep",
+  "created_at": "2026-07-20",
+  "current_phase": 5,
+  "phases": {
+    "split": "completed",
+    "requirements": "completed",
+    "hardware": "completed",
+    "brainstorm": "completed",
+    "milestones": "completed"
+  },
+  "subsystems": ["定向广播触发", "断连空闲超时→慢广播", "RP2350活动检测增强"],
+  "current_subsystem": 2
+}

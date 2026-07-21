@@ -1,3 +1,18 @@
 {
-    "idf.pythonInstallPath": "/home/book/.espressif/python_env/idf5.2_py3.10_env/bin/python"
+  "idf.currentSetup": "E:\\WorkSpace\\C_WorkSpacee\\ESP-IDF5.2\\.espressif\\release-v5.2\\esp-idf",
+  "idf.customExtraVars": {
+    "IDF_TOOLS_PATH": "E:\\WorkSpace\\C_WorkSpacee\\ESP-IDF5.2\\.espressif\\release-v5.2\\tools",
+    "IDF_PYTHON_ENV_PATH": "E:\\WorkSpace\\C_WorkSpacee\\ESP-IDF5.2\\.espressif\\release-v5.2\\tools\\python\\release-v5.2\\venv",
+    "ESP_ROM_ELF_DIR": "E:\\WorkSpace\\C_WorkSpacee\\ESP-IDF5.2\\.espressif\\release-v5.2\\tools\\esp-rom-elfs\\20240305\\"
+  },
+  "idf.buildPath": "${workspaceFolder}/build",
+  "idf.flashType": "UART",
+  "idf.portWin": "COM19",
+  "idf.monitorPort": "COM19",
+  "clangd.path": "E:\\WorkSpace\\C_WorkSpacee\\ESP-IDF5.2\\.espressif\\release-v5.2\\tools\\esp-clang\\16.0.1-fe4f10a809\\esp-clang\\bin\\clangd.exe",
+  "clangd.arguments": [
+    "--background-index",
+    "--query-driver=**",
+    "--compile-commands-dir=e:\\WorkSpace\\C_WorkSpacee\\ESP-IDF5.2\\.espressif\\release-v5.2\\esp32c6_ble_hid_gamepad_test\\build"
+  ]
 }
