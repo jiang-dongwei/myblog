@@ -48,6 +48,13 @@ status arrives. A terminal `Disconnected` or `Connected` result expires after
 1000ms and the OLED/Base output then returns to the state that existed before
 the notification.
 
+Fightpad12Slim currently enables
+`FIGHTPAD12SLIM_ESP32_BT_STATUS_DUAL_CHASE=1`. Pairing and Connecting therefore
+render two pure-blue three-pixel trails on the 19-pixel GP40 Base chain. Each
+trail uses `80%/25%/5%` head-to-tail brightness, advances one pixel every 50ms,
+and the second head stays nine logical pixels from the first. Setting the macro
+to `0` restores the preserved single five-pixel `5%/25%/80%/25%/5%` Chase.
+
 At startup, the ESP32-C6 sends firmware-information frames, then repeats the
 plain-text ASCII line `C6_DONE\n`, then sends the initial Bluetooth status.
 `C6_DONE` is not an 8-byte binary frame and has no runtime action here. The

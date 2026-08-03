@@ -1,5 +1,5 @@
 export default {
-	'brand-text': 'GP2040-CE',
+	'brand-text': 'FIGHTPAD',
 	'button-clear-all-label': 'Borrar Todo',
 	'button-delete-color-label': 'Eliminar Color',
 	'button-dismiss-label': 'Descartar',

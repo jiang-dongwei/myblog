@@ -1,4 +1,5 @@
 #include "addons/turbo.h"
+#include "addons/scrollwheel_menu.h"
 
 #include "hardware/adc.h"
 
@@ -129,6 +130,15 @@ void TurboInput::process()
     const TurboOptions& options = Storage::getInstance().getAddonOptions().turboOptions;
     uint16_t buttonsPressed = gamepad->state.buttons & TURBO_BUTTON_MASK;
     uint8_t dpadPressed = gamepad->state.dpad & GAMEPAD_MASK_DPAD;
+
+    // The menu owns GP2..GP20 while its gameplay lock is active.  Keep the
+    // configured turbo mask intact, but do not toggle buttons, adjust the
+    // shot rate, or apply turbo pulses until every gameplay key is released.
+    if (isScrollWheelGameplayInputLocked()) {
+        lastPressed = 0;
+        lastDpad = 0;
+        return;
+    }
 
     if (!options.enabled && (!hasTurboAssigned == true)) return;
 

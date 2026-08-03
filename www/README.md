@@ -2,6 +2,10 @@
 
 Simple web application for gamepad configuration.
 
+For a source-backed overview of the implemented pages, firmware data flow,
+storage behavior, and modification points, see
+[`../docs/WEB_CONFIG_FUNCTIONAL_AND_DEVELOPMENT_GUIDE.md`](../docs/WEB_CONFIG_FUNCTIONAL_AND_DEVELOPMENT_GUIDE.md).
+
 ## Requirements
 
 * NodeJS and NPM to build the React app
@@ -16,8 +20,9 @@ The mock data Express server is running at <http://localhost:8080>.
 
 ### Connected board
 
-Run `npm run dev-board`. This will start up the React app and try connect to the board running the
-[web-configurator](https://gp2040-ce.info/web-configurator).
+Run `npm run dev-board`. This starts the React app locally and sends its API
+requests to the connected board at `http://192.168.7.1`. The board must already
+be running in Web Config mode.
 
 ### API Endpoints
 
@@ -25,15 +30,11 @@ When adding a new API endpoint to the GP2040-CE Configurator:
 
 > NOTE: All endpoints should be under the `/api` path
 
-* Add the endpoint to `src/webserver.cpp`.
-  * Add a define at the top: `#define API_GET_NEW_ENDPOINT "/api/getNewEndpoint"`
-    * Use the naming convention `API_[GET/SET]_{ENDPOINT_PATH}` for the define
-    * Use the naming convention `/api/{[get/set]EndpointPath}` for the path
-  * Create the backing method with the same name as the API path: `string getNewEndpoint()`
-  * Add handling code in `fs_open_custom` for the API path
-* Add a mock data endpoint to `src/server/app.js`
-* Add the client-side API function to `www/src/Services/WebApi.js`.
-* Add the endpoint to the Postman collection at `www/server/docs/GP2040-CE.postman_collection.json`
+* Add the handler to `../src/webconfig.cpp` and register the `/api/...` path in
+  `handlerFuncs` or `handlerFuncsWithStatusCode`.
+* Add a mock data endpoint to `server/app.js`.
+* Add the client-side API function to `src/Services/WebApi.js`.
+* Add the endpoint to the Postman collection at `server/docs/GP2040-CE.postman_collection.json`.
 
 ### Files
 

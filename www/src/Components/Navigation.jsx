@@ -44,6 +44,7 @@ const Navigation = () => {
 	};
 
 	const { t } = useTranslation('');
+	const brandName = t('Common:brand-text');
 
 	// eventKey prop is required on NavLink components in order for mobile menu
 	// to autoclose, so just auto increment as we build the menu
@@ -51,13 +52,14 @@ const Navigation = () => {
 
 	return (
 		<Navbar collapseOnSelect expand="md" fixed="top">
-			<Navbar.Brand title={`GP2040-CE ${t('Navigation:home-label')}`}>
-				<Nav.Link as={NavLink} to="/" eventKey={eventKey++}>
-					<img
-						src="images/logo.png"
-						className="title-logo"
-						alt="GP2040-CE logo"
-					/>
+			<Navbar.Brand title={`${brandName} ${t('Navigation:home-label')}`}>
+				<Nav.Link
+					as={NavLink}
+					to="/"
+					eventKey={eventKey++}
+					className="title-brand"
+				>
+					<span className="title-wordmark">{brandName}</span>
 				</Nav.Link>
 			</Navbar.Brand>
 			<Navbar.Toggle aria-controls="responsive-navbar-nav" />

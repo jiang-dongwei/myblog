@@ -524,12 +524,28 @@ void FightpadAmbientLEDAddon::renderBluetoothStatusAmbient(
     case FightpadESP32BluetoothStatus::Connecting:
     case FightpadESP32BluetoothStatus::Pairing:
         {
-            const uint8_t chasePixel = static_cast<uint8_t>((elapsedMs / 200U) % count);
+#if FIGHTPAD12SLIM_ESP32_BT_STATUS_DUAL_CHASE
+            const uint8_t chaseHead = static_cast<uint8_t>((elapsedMs / 50U) % count);
+            const uint8_t chaseHeads[2] = {
+                chaseHead,
+                static_cast<uint8_t>((chaseHead + count / 2U) % count),
+            };
+            static const float tailBrightness[3] = {0.80f, 0.25f, 0.05f};
+            for (uint8_t segment = 0; segment < 2; segment++) {
+                for (uint8_t i = 0; i < 3; i++) {
+                    const uint8_t index = static_cast<uint8_t>(
+                        (chaseHeads[segment] + count - i) % count);
+                    frame[index] = ColorBlue.value(fmt, tailBrightness[i]);
+                }
+            }
+#else
+            const uint8_t chasePixel = static_cast<uint8_t>((elapsedMs / 50U) % count);
             static const float gradient[5] = {0.05f, 0.25f, 0.80f, 0.25f, 0.05f};
             for (uint8_t i = 0; i < 5; i++) {
                 const uint8_t index = static_cast<uint8_t>((chasePixel + i) % count);
                 frame[index] = ColorBlue.value(fmt, gradient[i]);
             }
+#endif
         }
         break;
 

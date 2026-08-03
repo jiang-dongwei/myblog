@@ -1,4 +1,5 @@
 #include "addons/input_macro.h"
+#include "addons/scrollwheel_menu.h"
 #include "storagemanager.h"
 #include "GamepadState.h"
 
@@ -243,6 +244,14 @@ void InputMacro::runCurrentMacro() {
 
 void InputMacro::preprocess()
 {
+    // Do not allow a macro to keep injecting game input while the scrollwheel
+    // menu owns the physical controls.  Resetting also prevents a toggle or
+    // hold-repeat macro from resuming after the menu closes.
+    if (isScrollWheelGameplayInputLocked()) {
+        reset();
+        return;
+    }
+
     FocusModeOptions * focusModeOptions = &Storage::getInstance().getAddonOptions().focusModeOptions;
     if (focusModeOptions->enabled && focusModeOptions->macroLockEnabled) {
         Gamepad * gamepad = Storage::getInstance().GetGamepad();

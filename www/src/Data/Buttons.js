@@ -1,6 +1,6 @@
 export const BUTTONS = {
 	gp2040: {
-		label: 'GP2040',
+		label: 'FIGHTPAD',
 		value: 'gp2040',
 		Up: 'Up',
 		Down: 'Down',

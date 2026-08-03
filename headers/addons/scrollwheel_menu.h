@@ -38,13 +38,12 @@
 #define SCROLLWHEEL_ACTIVE_LOW 1
 #endif
 
-#ifndef SCROLLWHEEL_LONG_PRESS_MS
-#define SCROLLWHEEL_LONG_PRESS_MS 3000
-#endif
+// Physical Fightpad controls that must not reach gameplay while the menu owns
+// input. GP19 remains available to the menu through its direct GPIO read.
+static constexpr uint32_t SCROLLWHEEL_GAMEPLAY_GPIO_MASK = 0x001FFFFCu;
 
-// GP30 5-state FSM timing parameters (hardcoded in updateButton)
 #ifndef SCROLLWHEEL_LONG_PRESS_MS
-#define SCROLLWHEEL_LONG_PRESS_MS 3000
+#define SCROLLWHEEL_LONG_PRESS_MS 2000
 #endif
 
 #ifndef SCROLLWHEEL_ROTARY_DEBOUNCE_MS
@@ -118,12 +117,16 @@ extern volatile bool g_menuStateDirty;
 // Written by Core0, read by Core1 (DisplayAddon) and FightpadAmbientLEDAddon.
 extern volatile bool g_scrollWheelMenuActive;
 
+// Core0-only gameplay ownership gate. It stays asserted after the menu closes
+// until every GP2..GP20 input has been released and debounced.
+bool isScrollWheelGameplayInputLocked();
+
 // Set true as soon as GP30 is pressed (FSM leaves IDLE); cleared on release.
 // FightpadAmbientLEDAddon checks this to avoid processing GP30 as a DIP toggle
 // during the long-press window before g_scrollWheelMenuActive becomes true.
 extern volatile bool g_scrollWheelButtonBusy;
 
-// Set true when a GP30 long press (≥3s) is detected; cleared on release.
+// Set true when a GP30 long press (≥2s) is detected; cleared on release.
 // FightpadAmbientLEDAddon checks this to suppress the ON/OFF release edge
 // when the button release follows a long press (menu enter or exit).
 extern volatile bool g_scrollWheelButtonLongPressed;
@@ -180,6 +183,9 @@ private:
 
     // GP30: 5-state button FSM (0x1abin/MultiButton classic pattern)
     void updateButton(uint32_t now);
+
+    // Menu gameplay-input ownership state machine (Core0 only)
+    void updateGameplayInputLock(uint32_t now);
 
     // Menu navigation
     void navUp();       // GP31 edge → move cursor up

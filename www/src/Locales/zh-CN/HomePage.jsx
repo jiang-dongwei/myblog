@@ -4,7 +4,7 @@ export default {
 	'build-text': '构建版本: {{build}}',
 	'current-text': '当前版本: {{version}}',
 	'get-update-text': '获取最新版本',
-	'header-text': '欢迎使用 GP2040-CE Web 配置工具！',
+	'header-text': '欢迎使用 FIGHTPAD Web 配置工具！',
 	'latest-text': '最新版本: {{version}}',
 	'memory-flash-text': '闪存',
 	'memory-board-text': '板载闪存',

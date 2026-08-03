@@ -13,6 +13,19 @@
 static constexpr uint8_t RGB_SUB_KEY_FLASH_INDEX = 0;
 static constexpr uint8_t RGB_SUB_ALL_OFF_INDEX = 4;
 static constexpr uint8_t BRIGHTNESS_LEVEL_COUNT = 3;
+static constexpr uint32_t GAMEPLAY_INPUT_RELEASE_MS = 30;
+
+namespace {
+enum class GameplayInputLockState : uint8_t {
+    UNLOCKED,
+    CAPTURED,
+    DRAIN_UNTIL_RELEASE,
+};
+
+GameplayInputLockState gameplayInputLockState = GameplayInputLockState::UNLOCKED;
+bool gameplayReleaseTimerRunning = false;
+uint32_t gameplayReleaseStartMs = 0;
+} // namespace
 
 const SWMenuItem kMenuMain[] = {
     { "RP2350B FW Version", SWMenuLevel::INFO, 0 },
@@ -97,6 +110,10 @@ volatile uint8_t g_menuAmbientEffect = 0xFF;
 volatile uint8_t g_menuBrightnessLevel = 0;
 volatile bool g_menuRgbPowerEnabled = true;
 
+bool isScrollWheelGameplayInputLocked() {
+    return gameplayInputLockState != GameplayInputLockState::UNLOCKED;
+}
+
 // ── Pin helpers ──────────────────────────────────────────────────────────
 
 void ScrollWheelMenuAddon::initPin(int pin) {
@@ -146,6 +163,9 @@ void ScrollWheelMenuAddon::setup() {
     g_menuState.scrollOffset = 0;
     g_menuStateDirty = false;
     g_scrollWheelMenuActive = false;
+    gameplayInputLockState = GameplayInputLockState::UNLOCKED;
+    gameplayReleaseTimerRunning = false;
+    gameplayReleaseStartMs = 0;
     g_scrollWheelLastActivityMs.store(getMillis(), std::memory_order_release);
 
     // Restore menu color overrides from flash (0xFF = never set).
@@ -649,6 +669,42 @@ void ScrollWheelMenuAddon::updateButton(uint32_t now) {
     }
 }
 
+void ScrollWheelMenuAddon::updateGameplayInputLock(uint32_t now) {
+    if (g_menuState.active) {
+        gameplayInputLockState = GameplayInputLockState::CAPTURED;
+        gameplayReleaseTimerRunning = false;
+        return;
+    }
+
+    if (gameplayInputLockState == GameplayInputLockState::UNLOCKED) {
+        return;
+    }
+
+    if (gameplayInputLockState == GameplayInputLockState::CAPTURED) {
+        gameplayInputLockState = GameplayInputLockState::DRAIN_UNTIL_RELEASE;
+        gameplayReleaseTimerRunning = false;
+    }
+
+    Gamepad* gamepad = Storage::getInstance().GetGamepad();
+    const uint32_t rawPressed =
+        (~static_cast<uint32_t>(gpio_get_all())) & SCROLLWHEEL_GAMEPLAY_GPIO_MASK;
+    const bool debouncedReleased = gamepad != nullptr &&
+        ((static_cast<uint32_t>(gamepad->debouncedGpio) &
+          SCROLLWHEEL_GAMEPLAY_GPIO_MASK) == 0);
+
+    if (rawPressed == 0 && debouncedReleased) {
+        if (!gameplayReleaseTimerRunning) {
+            gameplayReleaseTimerRunning = true;
+            gameplayReleaseStartMs = now;
+        } else if ((now - gameplayReleaseStartMs) >= GAMEPLAY_INPUT_RELEASE_MS) {
+            gameplayInputLockState = GameplayInputLockState::UNLOCKED;
+            gameplayReleaseTimerRunning = false;
+        }
+    } else {
+        gameplayReleaseTimerRunning = false;
+    }
+}
+
 // ── Main process ─────────────────────────────────────────────────────────
 
 void ScrollWheelMenuAddon::process() {
@@ -656,6 +712,10 @@ void ScrollWheelMenuAddon::process() {
 
     // GP30: 5-state FSM with digital filter
     updateButton(now);
+
+    // Capture immediately after GP30 opens the menu. This also covers the
+    // edge case where an already-held GP19 closes it later in this same frame.
+    updateGameplayInputLock(now);
 
     // GP31/GP32: simple edge detection for rotary navigation
     bool aRaw = readPin(SCROLLWHEEL_PIN_A);
@@ -699,4 +759,8 @@ void ScrollWheelMenuAddon::process() {
 
     prevA = aRaw;
     prevB = bRaw;
+
+    // Update again after menu navigation so a GP19 exit starts draining in
+    // this same Core0 loop iteration.
+    updateGameplayInputLock(now);
 }

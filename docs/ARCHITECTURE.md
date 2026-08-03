@@ -295,6 +295,9 @@ Storage::getInstance()        // Meyer's 单例（C++11 线程安全）
 
 内嵌 lwIP HTTPD 服务器 + React SPA。提供完整的 JSON REST API（GET/POST）读写所有配置项。支持在线备份/恢复。
 
+页面功能、接口分组、保存流程、量产默认值和二次开发入口详见
+[`WEB_CONFIG_FUNCTIONAL_AND_DEVELOPMENT_GUIDE.md`](WEB_CONFIG_FUNCTIONAL_AND_DEVELOPMENT_GUIDE.md)。
+
 ---
 
 ## 7. 显示系统

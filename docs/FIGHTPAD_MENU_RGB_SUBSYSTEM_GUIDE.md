@@ -54,7 +54,7 @@ FightpadAmbientLEDAddon（Core0）
 
 | 资源 | 当前用途 | 配置依据 |
 |---|---|---|
-| GP30 | 拨轮按键 SW，短按选择、长按 3 秒进入/退出 | `SCROLLWHEEL_PIN_SW` |
+| GP30 | 拨轮按键 SW，短按选择、长按 2 秒进入/退出 | `SCROLLWHEEL_PIN_SW` |
 | GP31 | 菜单向下脉冲 | `SCROLLWHEEL_PIN_A` |
 | GP32 | 菜单向上脉冲 | `SCROLLWHEEL_PIN_B` |
 | GP19 | 返回上一级；板级按键名为 A2/BACK | `SCROLLWHEEL_PIN_BACK` |
@@ -170,7 +170,7 @@ GP30 不是简单的“按下计时”。它先经过 30 ms 数字滤波，然�
 BTN_IDLE ───────────────► BTN_DEBOUNCE_PRESS ─────────► BTN_PRESS
    ▲                            │                          │
    │                            └─ 抖动释放 ───────────────┘
-   │                                                       │ 持续 3000 ms
+   │                                                       │ 持续 2000 ms
    │                                                       ▼
    └──── 稳定释放 30 ms ◄── BTN_DEBOUNCE_RELEASE ◄──── BTN_LONG
              │
@@ -179,7 +179,7 @@ BTN_IDLE ───────────────► BTN_DEBOUNCE_PRESS ─
 
 关键行为：
 
-- `BTN_PRESS` 达到 3000 ms：立即调用 `navToggle()`，进入或退出菜单。
+- `BTN_PRESS` 达到 2000 ms：立即调用 `navToggle()`，进入或退出菜单。
 - 短按只在稳定释放后调用 `navSelect()`。
 - 从 `BTN_LONG` 进入释放状态时，`btnFromLong=true`，因此不会再补发一次短按。
 - 任意 GP30 原始边沿都会更新 `g_scrollWheelLastActivityMs`，用于唤醒 OLED 或刷新休眠计时。

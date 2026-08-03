@@ -97,6 +97,26 @@
 - 功能: 接收 ESP32-C6 `0x46 0x53` 状态帧，自动显示 Pairing/Connecting/Connected/Disconnected 页面，并用临时蓝色 Chase、全蓝或全黑 Base 灯效反馈连接状态后无损恢复
 - 讨论ID: `2026-07-20-bluetooth-status-popup-led`
 
+### 菜单期间游戏输入锁定与 ESP32-C6 协同
+- 物理硬件: 复用 GP2～GP20 游戏按键、GP19 菜单 BACK、GP30/GP31/GP32 菜单控制和 RP2350B UART0 到 ESP32-C6 的既有链路
+- 功能: 菜单打开后锁定 USB 游戏输出和本地 Turbo/宏/热键副作用；退出后等待 GP2～GP20 全部释放 30ms；`FP` Byte4 bit7 将锁状态交给 ESP32-C6 执行 BLE HID 最终中和与排空
+- 讨论ID: `2026-07-21-menu-game-input-lockout`
+
+### 蓝牙状态双段 Chase
+- 物理硬件: 无新增硬件，复用 GP40 的 19 颗 Base LED
+- 功能: 保留原单段蓝色 Chase，并通过板级条件编译切换到两段近似对角、每段 `80%/25%/5%` 拖尾、`50ms/格` 的蓝色 Chase
+- 讨论ID: `2026-07-22-bluetooth-dual-chase`
+
+### Fightpad12Slim 量产默认启动 Logo
+- 物理硬件: 复用 I2C0 GP0/GP1 的现有 128×64 单色 OLED
+- 功能: 将用户提供的 1024 字节字模固化为 Fightpad12Slim 板级默认静态启动 Logo，量产新设备无需逐台通过 Web Config 上传
+- 讨论ID: `2026-07-31-fightpad-default-splash-logo`
+
+### Web Config Fightpad 品牌
+- 物理硬件: 无硬件变化，只修改设备内置 Web Config 前端资源
+- 功能: 导航栏使用与 OLED 启动图一致的方框 R Logo 和 `FIGHTPAD` 粗斜体字标，并同步首页与浏览器品牌元数据
+- 讨论ID: `2026-07-31-webconfig-fightpad-branding`
+
 ## 开发步骤状态
 
 | 步骤 | 描述 | 状态 | 讨论ID |
@@ -176,3 +196,18 @@
 | S23-C | GP40 蓝色 Chase/静态/关闭临时覆盖与原灯效恢复 | completed | 2026-07-20-bluetooth-status-popup-led |
 | S23-D | 协议、显示、灯效和优先级非编译静态验证 | completed | 2026-07-20-bluetooth-status-popup-led |
 | S23-E | Pairing/Connecting成功或失败、All OFF、休眠和低电实机验证 | pending | 2026-07-20-bluetooth-status-popup-led |
+| S24-A | RP2350 菜单锁存、退出释放排空与 GP19 菜单功能保留 | completed | 2026-07-21-menu-game-input-lockout |
+| S24-B | USB neutral 门控和 Turbo/宏/普通及重启热键副作用保护 | completed | 2026-07-21-menu-game-input-lockout |
+| S24-C | `FP` Byte4 bit7 锁标志与 ESP32-C6 共享实施文档 | completed | 2026-07-21-menu-game-input-lockout |
+| S24-D | RP2350 代码、协议帧和文档非编译静态验证 | completed | 2026-07-21-menu-game-input-lockout |
+| S24-E | ESP32-C6 实现、双端构建烧录和 USB/BLE 实机回归 | pending | 2026-07-21-menu-game-input-lockout |
+| S25-A | 蓝牙状态 Chase 条件编译与双段对角拖尾实现 | completed | 2026-07-22-bluetooth-dual-chase |
+| S25-B | 新旧 Chase 分支、速度、亮度和状态隔离非编译静态验证 | completed | 2026-07-22-bluetooth-dual-chase |
+| S25-C | Pairing/Connecting、All OFF 和低电优先级实机验证 | pending | 2026-07-22-bluetooth-dual-chase |
+| S26-A | Fightpad12Slim 板级 128×64 默认启动 Logo 接入 | completed | 2026-07-31-fightpad-default-splash-logo |
+| S26-B | 字节数、源字模一致性与配置路径非编译静态验证 | completed | 2026-07-31-fightpad-default-splash-logo |
+| S26-C | 构建烧录、3 秒显示与恢复出厂配置实机验证 | pending | 2026-07-31-fightpad-default-splash-logo |
+| S27-A | Fightpad SVG Logo 与导航栏 `R + FIGHTPAD` 字标 | completed | 2026-07-31-webconfig-fightpad-branding |
+| S27-B | 多语言首页品牌与浏览器元数据同步 | completed | 2026-07-31-webconfig-fightpad-branding |
+| S27-C | SVG、资源引用、响应式样式与补丁非编译静态检查 | completed | 2026-07-31-webconfig-fightpad-branding |
+| S27-D | 返工：移除导航破图节点并将 FIGHTPAD 文字左移 | in_progress | 2026-07-31-webconfig-fightpad-branding |

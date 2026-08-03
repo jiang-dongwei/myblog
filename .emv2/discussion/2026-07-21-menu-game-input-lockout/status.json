@@ -1,0 +1,20 @@
+{
+  "discussion_id": "2026-07-21-menu-game-input-lockout",
+  "created_at": "2026-07-21",
+  "current_phase": 5,
+  "phases": {
+    "split": "completed",
+    "requirements": "completed",
+    "hardware": "completed",
+    "brainstorm": "completed",
+    "milestones": "completed"
+  },
+  "subsystems": [
+    "菜单游戏输入锁存",
+    "RP2350 USB 输出门控",
+    "RP2350 本地 Turbo/宏/热键保护",
+    "RP2350 到 ESP32-C6 菜单锁协议",
+    "跨 MCU 验证"
+  ],
+  "current_subsystem": 0
+}

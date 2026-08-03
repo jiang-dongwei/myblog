@@ -563,3 +563,113 @@ Base Effect 和 Key Effect 都需要同时提供两个呼吸灯入口：
 ### 讨论ID
 
 `2026-07-20-bluetooth-status-popup-led`
+
+## 2026-07-21: 菜单期间游戏输入锁定与 ESP32-C6 协同 (S24)
+
+### 需求与决策
+
+- GP30 长按真正打开菜单的同一轮开始锁定 GP2～GP20 的游戏交互；长按判定之前保持原行为。
+- GP19 继续通过直接 GPIO 读取执行菜单 `BACK/退出`，但对应的游戏 A2 输出必须被中和；GP20 Turbo 同样不得泄漏或修改配置。
+- RP2350 负责菜单锁存、USB 最终 neutral、本地 Turbo/宏/普通及重启热键保护；ESP32-C6 负责 BLE HID 最终 neutral 和独立的 release-to-rearm。
+- 退出菜单后不立即恢复：RP2350 要求 GP2～GP20 原始 GPIO 与消抖 GPIO 同时释放并连续稳定 30ms。
+- `FP` 继续传输真实 buttons、D-pad、LX、LY，仅在 Byte4 bit7 增加游戏锁标志；按钮 bit15 保持保留，避免旧 ESP32 将其解释成 Button16。
+- 本轮只修改 RP2350 工程并编写共享协议文档，不修改 ESP32-C6 源码；按仓库约定不运行编译。
+
+### 实现记录
+
+- `ScrollWheelMenuAddon` 增加 `UNLOCKED/CAPTURED/DRAIN_UNTIL_RELEASE` 三态；菜单打开同轮锁定，菜单关闭同轮进入释放排空。
+- USB 驱动处理期间临时替换为 neutral `GamepadState` 并屏蔽 GP2～GP20 的 `debouncedGpio`，处理后恢复真实状态，保证 OLED、灯效与 ESP32 串口快照不被破坏。
+- 锁定期间暂停 `gamepad->hotkey()`、重启热键和 Turbo 处理；输入宏执行 `reset()`，防止 toggle/hold 宏在退出后继续。
+- Bluetooth `FP` Byte4 使用 `bit7 lock | bits3..0 dpad`；帧长、类型、按钮、轴、发送节拍与 XOR 校验规则保持不变，锁状态变化参与整帧比较并立即发送。
+- 新增 `docs/menu_gameplay_lock_protocol_rp2350_esp32.md`，规定 ESP32-C6 的 `UNLOCKED/LOCKED/DRAIN` 状态机、活动检测、`FT`/超时 fail-neutral、GP19/GP20 边界和测试序列。
+- 定向调用链审计、已知帧 XOR 校验和 `git diff --check` 通过；未运行编译。S24-E 等待 ESP32 AI 实现后由用户完成双端构建、烧录和实机验证。
+
+### 讨论ID
+
+`2026-07-21-menu-game-input-lockout`
+
+## 2026-07-21: GP30 长按阈值缩短到 2 秒
+
+- `SCROLLWHEEL_LONG_PRESS_MS` 从 `3000` 调整为 `2000`，菜单进入和长按退出共用该阈值。
+- 保留原始输入滤波 30ms 和按下状态消抖 30ms，因此从物理按下到触发约为 2060ms，加少量主循环调度误差。
+- 同步更新菜单/RGB 子系统说明文档并清理头文件中的重复宏定义；状态机和短按互斥逻辑不变。
+- `git diff --check` 通过；按仓库约定未运行编译。
+
+## 2026-07-22: 蓝牙状态双段 Chase 规划 (S25)
+
+### 需求与决策
+
+- 保留蓝牙 Pairing/Connecting 现有单段 5 灯 Chase，并增加板级条件编译开关。
+- 新版使用两段纯蓝 Chase，每段 3 颗，头灯到尾灯亮度为 `80%/25%/5%`。
+- GP40 共 19 颗灯，第二段头灯固定相对第一段偏移 9 格，形成最接近的对角位置。
+- 两段同方向移动，尾灯位于运动方向后方，速度保持 `50ms/格`。
+- Fightpad12Slim 默认启用新版；公共默认关闭新版以保留其他板级兼容性。
+- Connected/Disconnected、GP22、普通 Base/Key Chase、All OFF 临时唤醒和 `SOC <= 7%` 低电保护不变。
+
+### 讨论ID
+
+`2026-07-22-bluetooth-dual-chase`
+
+### 实现记录
+
+- `BoardConfig.h` 当前将 `FIGHTPAD12SLIM_ESP32_BT_STATUS_DUAL_CHASE` 设为 `1`，公共头文件默认值为 `0`。
+- 新分支使用两个相隔 `count / 2`（19 灯时为 9）的 Chase 头，每个头后方两颗形成 `80%/25%/5%` 拖尾。
+- 旧分支保留单段 5 灯 `5%/25%/80%/25%/5%` 梯度；新旧分支均为 `50ms/格`。
+- 19 个可能头灯位置枚举全部保持 9 格头灯偏移且同时点亮 6 个互不重叠的逻辑灯位。
+- 定向状态隔离检查和 `git diff --check` 通过；按仓库约定未运行编译，S25-C 等待用户实机验证。
+
+## 2026-07-31: Fightpad12Slim 量产默认启动 Logo (S26)
+
+### 需求与决策
+
+- 使用用户提供的 `zimo.TXT`，数据为 128×64、1 bpp、逐行、MSB-first、阴码，共 1024 字节。
+- 只覆盖 Fightpad12Slim 的 `DEFAULT_SPLASH`，不修改 GP2040-CE 通用默认图和其他板卡。
+- 保持静态启动图模式和 3000 ms 显示时间，保持字模原位置和极性。
+- 保留 Web Config 的 Logo 覆盖能力；量产新设备直接使用固件默认值，已有持久化配置的设备需恢复出厂或擦除配置后验证。
+- 按仓库约定不运行编译，由用户完成构建、烧录和实机验证。
+
+### 实现记录
+
+- 在 `configs/Fightpad12Slim/BoardConfig.h` 内新增板级 `DEFAULT_SPLASH`。
+- 将 PCtoLCD2002 的 64 行嵌套输出扁平化为 GP2040-CE 可直接初始化的 1024 字节宏。
+- 静态解析确认宏和 `zimo.TXT` 都是 1024 字节且逐字节相同；点亮区域保持 `x=37..81`、`y=14..49`。
+- 定向启动图调用链检查和 `git diff --check` 通过；按仓库约定未运行编译。
+- S26-C 等待用户构建、烧录和实机验证。
+
+### 讨论ID
+
+`2026-07-31-fightpad-default-splash-logo`
+
+## 2026-07-31: Web Config Fightpad 品牌 (S27)
+
+### 需求与决策
+
+- Web Config 左上角旧资源是包含完整 `GP2040-CE` 字样的 PNG，不是独立图标和文字。
+- 使用 S26 启动图中同一个方框 R 轮廓生成透明 SVG，主色沿用 `#ec008c`。
+- 导航栏改成独立的 R Logo 和粗斜体 `FIGHTPAD` 文字，方便缩放和后续调整。
+- 同步所有语言的品牌名与首页欢迎标题，以及浏览器 title、description、favicon 和 manifest。
+- 不全局替换功能说明、协议或兼容性文本中的 `GP2040-CE`。
+- 按仓库约定不运行 Web 或固件编译，由用户完成构建烧录和设备页面验证。
+
+### 实现记录
+
+- 新增 `www/public/images/fightpad-logo.svg`，图形轮廓来自 `zimo.TXT` 的 45×36 点亮区域。
+- `Navigation.jsx` 使用本地化 `Common:brand-text`，组合 SVG 与 `FIGHTPAD` 文字；导航样式支持亮色和暗色背景。
+- 九种语言的 `Common.brand-text` 和 HomePage 欢迎标题改为 `FIGHTPAD`。
+- `index.html` 和 `manifest.json` 使用 Fightpad 页面名称和 SVG 图标。
+- SVG 解析得到 189 个横向像素段、1064 个点亮像素，与 `zimo.TXT` 裁剪区域逐像素差异为 0。
+- 九种语言品牌检查、旧导航 Logo 引用搜索、亮/暗背景临时预览和 `git diff --check` 通过；浏览器连接初始化失败，因此未声明完成实际页面测试。
+- S27-D 等待用户构建烧录后检查实际设备 Web Config。
+
+### S27-D首次实测失败
+
+- 用户进入设备 Web Config 后观察到左上角 Logo、右上角模式选项和首页欢迎标题仍显示 GP2040。
+- 已记录至 `.emv2/checkpoints/HVR-S27-001.md`，S27-D进入返工。
+- 根因是 `Buttons.js` 的模式标签漏改，同时 `www/build` 与 `lib/httpd/fsdata.c` 仍是品牌修改前的旧打包数据；`SKIP_WEBBUILD=TRUE` 不会自动更新它们。
+- 返工版本截图显示 SVG Logo 加载失败，但独立的 `FIGHTPAD` 文字正常；按用户决策删除导航栏 `<img>` 与 `.title-logo`，同时移除 `gap`，使文字从原 Logo 左边界直接开始。
+- 源码和当时现有的 `www/build` 已同步修改；S27-D继续等待重新生成 `fsdata.c`、编译烧录和实机复测。
+- 无变化复测的产物审计确认路径没有指错：`www/src` 和 `www/build` 已在13:35至13:36更新，但 `fsdata.c`、httpd对象与 `build/GP2040-CE_0.0.0_Fightpad12Slim.uf2` 均停留在11:37，实际烧录固件不含删除图片修改。
+
+### 讨论ID
+
+`2026-07-31-webconfig-fightpad-branding`

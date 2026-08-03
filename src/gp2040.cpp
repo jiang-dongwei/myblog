@@ -81,16 +81,24 @@ static bool fightpadBluetoothTransportSelected() {
 		gpio_get(FIGHTPAD12SLIM_TRANSPORT_SEL_PIN) == FIGHTPAD12SLIM_TRANSPORT_BT_LEVEL;
 }
 
-static bool processFightpadUsbTransportReport(GPDriver *inputDriver, Gamepad *gamepad, bool bluetoothTransportSelected) {
-	if (!bluetoothTransportSelected) {
+static bool processFightpadUsbTransportReport(
+	GPDriver *inputDriver,
+	Gamepad *gamepad,
+	bool bluetoothTransportSelected,
+	bool gameplayInputLocked
+) {
+	if (!bluetoothTransportSelected && !gameplayInputLocked) {
 		return inputDriver->process(gamepad);
 	}
 
 	GamepadState savedState = gamepad->state;
+	Mask_t savedDebouncedGpio = gamepad->debouncedGpio;
 	GamepadState neutralState;
 	gamepad->state = neutralState;
+	gamepad->debouncedGpio = savedDebouncedGpio & ~SCROLLWHEEL_GAMEPLAY_GPIO_MASK;
 	bool processed = inputDriver->process(gamepad);
 	gamepad->state = savedState;
+	gamepad->debouncedGpio = savedDebouncedGpio;
 
 	return processed;
 }
@@ -374,8 +382,11 @@ void GP2040::run() {
 		// (Post) Process for add-ons
 		addons.ProcessAddons();
 
-		gamepad->hotkey(); 	// check for MPGS hotkeys
-		rebootHotkeys.process(gamepad, configMode);
+		const bool gameplayInputLocked = isScrollWheelGameplayInputLocked();
+		if (!gameplayInputLocked) {
+			gamepad->hotkey(); 	// check for MPGS hotkeys
+			rebootHotkeys.process(gamepad, configMode);
+		}
 
 		checkProcessedState(processedGamepad->state, gamepad->state);
 
@@ -386,7 +397,8 @@ void GP2040::run() {
 		bool processed = processFightpadUsbTransportReport(
 			inputDriver,
 			gamepad,
-			fightpadBluetoothTransportSelected()
+			fightpadBluetoothTransportSelected(),
+			gameplayInputLocked
 		);
 
 		// TinyUSB Task update

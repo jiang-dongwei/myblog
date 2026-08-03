@@ -38,9 +38,22 @@ nav.navbar {
 	}
 }
 
-.title-logo {
-	height: 40px;
-	margin: 0.25rem 0rem 0.25rem $nav-outer-margin;
+.title-brand {
+	display: flex;
+	align-items: center;
+	margin-left: $nav-outer-margin;
+	padding: 0.25rem 0;
+	text-decoration: none;
+}
+
+.title-wordmark {
+	color: #ec008c;
+	font-family: "Arial Black", "Segoe UI Black", "Trebuchet MS", sans-serif;
+	font-size: 1.45rem;
+	font-style: italic;
+	font-weight: 900;
+	letter-spacing: 0.04em;
+	line-height: 1;
 }
 
 @media (max-width: 767.98px) {

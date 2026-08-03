@@ -1,5 +1,6 @@
 #include "addons/fightpad_esp32_proxy.h"
 #include "addons/fightpad_bq27220_battery.h"
+#include "addons/scrollwheel_menu.h"
 
 #include "helper.h"
 #include "storagemanager.h"
@@ -18,6 +19,7 @@ constexpr uint8_t kFrameMagicBattery = 0x42;
 constexpr uint8_t kFrameMagicFirmwareInfo = 0x49;
 constexpr uint8_t kFrameMagicBluetoothStatus = 0x53;
 constexpr uint8_t kFrameLength = 8;
+constexpr uint8_t kInputReportGameplayLockFlag = 0x80;
 constexpr uint8_t kFirmwareInfoFlagMask = 0xC0;
 constexpr uint8_t kFirmwareInfoSeqMask = 0x3F;
 constexpr uint8_t kFirmwareInfoFlagSingle = 0x00;
@@ -944,12 +946,17 @@ void FightpadESP32ProxyAddon::sendInputReportFrame()
     }
 
     uint16_t buttons = mapInputReportButtons(gamepad->state);
+    uint8_t dpadAndFlags = (uint8_t)(gamepad->state.dpad & GAMEPAD_MASK_DPAD);
+    if (isScrollWheelGameplayInputLocked()) {
+        dpadAndFlags |= kInputReportGameplayLockFlag;
+    }
+
     uint8_t frame[8] = {
         kFrameMagic0,
         kFrameMagicReport,
         (uint8_t)(buttons & 0xFF),
         (uint8_t)(buttons >> 8),
-        (uint8_t)(gamepad->state.dpad & GAMEPAD_MASK_DPAD),
+        dpadAndFlags,
         (uint8_t)mapInputReportAxis(gamepad->state.lx),
         (uint8_t)mapInputReportAxis(gamepad->state.ly),
         0x00,
@@ -1020,4 +1027,3 @@ extern "C" void tud_cdc_line_coding_cb(uint8_t itf, cdc_line_coding_t const *lin
     }
 }
 #endif
-
