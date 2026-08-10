@@ -360,7 +360,7 @@ Top=Black && Bottom=Black && Flash=Black
 |---|---|---|---|---|
 | 0 | Static Color | 全部使用选中颜色 | Bright/Normal/Dim | 支持 |
 | 1 | Rainbow | 每颗 LED 使用不同色轮相位，整体移动 | Bright/Normal/Dim | 支持 |
-| 2 | Chase | 3 颗追逐，`0.60/0.25/0.05`，200 ms 前进 | 效果内部固定 | 支持 |
+| 2 | Chase | 单头 3 颗追逐，`0.80/0.25/0.05`，完整一圈 2000 ms | 效果内部固定 | 支持 |
 | 3 | 菜单隐藏 | 旧 Static Theme 兼容分支 | 固定 `0.5` | 支持 |
 | 4 | Breathing | 选中颜色正弦呼吸 | `0.02..0.5`，周期 2400 ms | 支持 |
 | 5 | 菜单隐藏 | 旧 Breathing Rainbow 兼容分支 | 呼吸函数 | 支持 |

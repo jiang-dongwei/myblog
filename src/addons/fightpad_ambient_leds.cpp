@@ -85,7 +85,7 @@ static void setFlashUntil(uint32_t *flashTimes, int ledIndex, uint32_t until) {
 }
 
 // ── Menu → RGB mapping ──────────────────────────────────────────────────
-// g_menuRgbTop/Bottom/Button store AnimationStation `colors` vector indices
+// Menu effect/flash colors store AnimationStation `colors` vector indices
 // (0=Black..15=Violet).  Direct lookup — index space is shared with proto
 // AnimationOptions.staticColorIndex / buttonColorIndex.
 static RGB menuIndexToColor(uint8_t idx) {
@@ -93,14 +93,6 @@ static RGB menuIndexToColor(uint8_t idx) {
     if (idx < ::colors.size())
         return ::colors[idx];
     return ColorBlack;  // fallback
-}
-
-static RGB chaseColorFor(uint16_t ledIndex, uint16_t ledCount, int16_t wheelFrame) {
-    uint16_t phase = static_cast<uint16_t>(wheelFrame);
-    if (ledCount > 0) {
-        phase += static_cast<uint16_t>((ledIndex * 256U) / ledCount);
-    }
-    return RGB::wheel(static_cast<uint8_t>(phase));
 }
 
 bool FightpadAmbientLEDAddon::available() {
@@ -218,7 +210,9 @@ void FightpadAmbientLEDAddon::setup() {
     lastSelector = lastControls & (CONTROL_ONOFF | CONTROL_PREV | CONTROL_NEXT);
     applySelectorState(lastSelector, enabled, effectIndex);
 #else
-    enabled = g_menuRgbPowerEnabled;
+    enabled = g_menuRgbPowerEnabled &&
+        g_manualLightEffectsEnabled &&
+        !g_scrollWheelRebootBlackout;
 #endif
 
     fightpadAmbientDiagEnabled = enabled ? 1 : 0;
@@ -245,7 +239,12 @@ void FightpadAmbientLEDAddon::process() {
     uint32_t now = getMillis();
     updateButtonFlash(now);
 #if !FIGHTPAD12SLIM_AMBIENT_DIP_SELECTOR_MODE
-    enabled = g_menuRgbPowerEnabled;
+    // GP30's runtime switch gates only normal Key/Base effects. Bluetooth
+    // status feedback remains an independent temporary GP40 power request in
+    // render()/show(), and low-battery cutoff remains the final override.
+    enabled = g_menuRgbPowerEnabled &&
+        g_manualLightEffectsEnabled &&
+        !g_scrollWheelRebootBlackout;
 #endif
     fightpadAmbientDiagEnabled = enabled ? 1 : 0;
     fightpadAmbientDiagEffect = effectIndex;
@@ -298,8 +297,8 @@ void FightpadAmbientLEDAddon::process() {
     }
 #endif
 
-    // LED rendering: driven exclusively by g_menuRgb* variables
-    // (set via scrollwheel menu, persisted to flash).  No DIP-switch
+    // LED rendering is driven exclusively by scrollwheel menu state
+    // (persisted to flash). No DIP-switch
     // color cycling — GPIO30-32 belong to the scrollwheel encoder now.
     if ((now - lastFrameTime) < UPDATE_INTERVAL_MS) {
         return;
@@ -459,6 +458,12 @@ void FightpadAmbientLEDAddon::render(uint32_t now) {
         return;
     }
 
+    // Controller Type changes use the existing save/reboot delay to show a
+    // clear blackout. This RAM-only state must override Bluetooth feedback.
+    if (g_scrollWheelRebootBlackout) {
+        return;
+    }
+
     FightpadESP32BluetoothStatusEvent bluetoothEvent = {};
     const bool bluetoothStatusActive =
         getFightpadESP32BluetoothStatusEvent(bluetoothEvent) &&
@@ -478,6 +483,7 @@ void FightpadAmbientLEDAddon::render(uint32_t now) {
         bluetoothStatusLightRequired =
             bluetoothEvent.status != FightpadESP32BluetoothStatus::Disconnected;
         if (enabled) {
+            updateLightEffectAnimation(now);
             renderButtons(now);
         }
         return;
@@ -508,8 +514,20 @@ void FightpadAmbientLEDAddon::render(uint32_t now) {
 #endif
 
     // ── Normal render path ──────────────────────────────────────────────
+    updateLightEffectAnimation(now);
     renderAmbient(now);
     renderButtons(now);
+}
+
+static uint8_t chaseHeadForCycle(
+    uint32_t now,
+    uint32_t startedAt,
+    uint32_t cycleMs,
+    uint8_t ledCount)
+{
+    const uint32_t phaseMs = (now - startedAt) % cycleMs;
+    return static_cast<uint8_t>(
+        (static_cast<uint64_t>(phaseMs) * ledCount) / cycleMs);
 }
 
 void FightpadAmbientLEDAddon::renderBluetoothStatusAmbient(
@@ -565,134 +583,104 @@ void FightpadAmbientLEDAddon::renderBluetoothStatusAmbient(
     }
 }
 
+// ── Shared Key/Base effect animation ──────────────────────────────────
+
+void FightpadAmbientLEDAddon::updateLightEffectAnimation(uint32_t now) {
+    static_assert(FIGHTPAD12SLIM_LIGHT_CHASE_STEP_MS > 0,
+        "Normal Light Effect Chase step must be greater than zero");
+    static_assert(FIGHTPAD12SLIM_GP22_LIGHT_CHASE_CYCLE_MS > 0,
+        "GP22 Light Effect Chase cycle must be greater than zero");
+    static_assert(FIGHTPAD12SLIM_GP40_LIGHT_CHASE_CYCLE_MS > 0,
+        "GP40 Light Effect Chase cycle must be greater than zero");
+
+    uint8_t effect = g_menuLightEffect;
+    if (effect >= LIGHT_EFFECT_COUNT) {
+        effect = LIGHT_EFFECT_STATIC_COLOR;
+    }
+
+    // A mode switch starts both chains from the same deterministic phase.
+    if (effect != lastLightEffect) {
+        lastLightEffect = effect;
+        wheelFrame = 0;
+        wheelReverse = false;
+        wheelLastMs = now;
+        lightChaseStartedMs = now;
+        lightChaseLastMs = now;
+        return;
+    }
+
+    if (effect == LIGHT_EFFECT_GRADIENT || effect == LIGHT_EFFECT_RAINBOW) {
+        if ((now - wheelLastMs) < UPDATE_INTERVAL_MS) {
+            return;
+        }
+        wheelLastMs = now;
+        const int16_t delta = (effect == LIGHT_EFFECT_GRADIENT) ? 2 : 1;
+        if (wheelReverse) {
+            wheelFrame -= delta;
+            if (wheelFrame < 0) {
+                wheelFrame = static_cast<int16_t>(delta - 1);
+                wheelReverse = false;
+            }
+        } else {
+            wheelFrame += delta;
+            if (wheelFrame > 255) {
+                wheelFrame = static_cast<int16_t>(256 - delta);
+                wheelReverse = true;
+            }
+        }
+        return;
+    }
+
+    if (effect == LIGHT_EFFECT_CHASE &&
+        (now - lightChaseLastMs) >= FIGHTPAD12SLIM_LIGHT_CHASE_STEP_MS) {
+        const uint32_t hueSteps =
+            (now - lightChaseLastMs) / FIGHTPAD12SLIM_LIGHT_CHASE_STEP_MS;
+        lightChaseLastMs += hueSteps * FIGHTPAD12SLIM_LIGHT_CHASE_STEP_MS;
+        wheelFrame = static_cast<int16_t>(
+            (static_cast<uint32_t>(wheelFrame) + hueSteps * 8U) & 0xFFU);
+    }
+}
+
 // ── Ambient LED effects (GP40, 19 LEDs) ───────────────────────────────
 
-// Static theme rows — same as neopicoleds.cpp alCustomStaticTheme.
-// Row index = themeIndex (0-4), column = color within the row (0-7).
-static const RGB kAmbientThemeRows[5][8] = {
-    {ColorRed,    ColorOrange, ColorYellow, ColorGreen,
-     ColorBlue,   ColorIndigo, ColorViolet, ColorWhite},
-    {ColorOrange, ColorRed,    ColorGreen,  ColorYellow,
-     ColorIndigo, ColorBlue,   ColorWhite,  ColorViolet},
-    {ColorYellow, ColorOrange, ColorRed,    ColorIndigo,
-     ColorBlue,   ColorGreen,  ColorViolet, ColorWhite},
-    {ColorGreen,  ColorOrange, ColorYellow, ColorRed,
-     ColorWhite,  ColorIndigo, ColorViolet, ColorBlue},
-    {ColorWhite,  ColorIndigo, ColorViolet, ColorOrange,
-     ColorBlue,   ColorGreen,  ColorYellow, ColorRed},
-};
-
 void FightpadAmbientLEDAddon::renderAmbient(uint32_t now) {
-    extern volatile uint8_t g_menuRgbBottom;
-    extern volatile uint8_t g_menuAmbientEffect;
-
-    // Base color (menu override or default white)
-    RGB baseColor = (g_menuRgbBottom != 0xFF)
-        ? menuIndexToColor(g_menuRgbBottom)
+    // GP40 and GP22 consume the same runtime effect color.
+    RGB baseColor = (g_menuRgbEffectColor != 0xFF)
+        ? menuIndexToColor(g_menuRgbEffectColor)
         : ColorWhite;
     LEDFormat fmt = static_cast<LEDFormat>(FIGHTPAD12SLIM_AMBIENT_LED_FORMAT);
     const uint8_t count = FIGHTPAD12SLIM_AMBIENT_LEDS_COUNT; // 19
     const float effectBrightness = getMenuEffectBrightness();
 
-    uint8_t effect = g_menuAmbientEffect;
-    // 0xFF = never set by menu → use default static color.
-    if (effect == 0xFF) effect = 0;
+    uint8_t effect = g_menuLightEffect;
+    if (effect >= LIGHT_EFFECT_COUNT) effect = LIGHT_EFFECT_STATIC_COLOR;
 
     switch (effect) {
     default:
-    case 0: // AL_CUSTOM_EFFECT_STATIC_COLOR — fixed selected color
+    case LIGHT_EFFECT_STATIC_COLOR:
         {
             uint32_t v = baseColor.value(fmt, effectBrightness);
             for (int i = 0; i < count; i++) frame[i] = v;
         }
         break;
 
-    case 1: // AL_CUSTOM_EFFECT_GRADIENT — all LEDs same shifting rainbow
+    case LIGHT_EFFECT_GRADIENT:
         {
             RGB wc = RGB::wheel(static_cast<uint8_t>(wheelFrame));
             uint32_t v = wc.value(fmt, effectBrightness);
             for (int i = 0; i < count; i++) frame[i] = v;
-
-            // Advance & bounce wheel
-            if (wheelReverse) {
-                wheelFrame -= 2;
-                if (wheelFrame < 0) { wheelFrame = 1; wheelReverse = false; }
-            } else {
-                wheelFrame += 2;
-                if (wheelFrame > 255) { wheelFrame = 254; wheelReverse = true; }
-            }
         }
         break;
 
-    case 2: // AL_CUSTOM_EFFECT_CHASE — 5 lit LEDs running around the chain
+    case LIGHT_EFFECT_BREATHING:
         {
-            // Advance chase head every ~200 ms
-            if (now - ambientChaseLastMs >= 200) {
-                ambientChaseLastMs = now;
-                ambientChasePixel++;
-                if (ambientChasePixel >= count) ambientChasePixel = 0;
-                wheelFrame = static_cast<int16_t>((wheelFrame + 8) & 0xFF);
-            }
-            // All off first
-            for (int i = 0; i < count; i++) frame[i] = 0;
-            // Light 5 consecutive LEDs with a symmetric brightness gradient using
-            // dynamic wheel colors: edges dim, center bright.
-            static const float grad[5] = {0.05f, 0.25f, 0.80f, 0.25f, 0.05f};
-            for (int i = 0; i < 5; i++) {
-                int idx = (ambientChasePixel + i) % count;
-                frame[idx] = chaseColorFor(idx, count, wheelFrame).value(fmt, grad[i]);
-            }
-        }
-        break;
-
-    case 3: // AL_CUSTOM_EFFECT_BREATHING_RAINBOW — brightness oscillation with color cycling
-        {
-            // Reset breath state on effect entry: always start dim→bright.
-            if (lastAmbientEffect != 3) {
-                breathBrightness  = 0.0f;
-                breathDimming     = false;
-                breathColorCycle  = 0;
-                lastAmbientEffect = 3;
-            }
-            // Oscillate brightness (slow, smooth breathing)
-            // The peak is halved to 0.5f, so halve the step as well to keep
-            // the legacy breathing rhythm close to its previous speed.
-            const float breathSpeed = 0.004f;
-            if (breathDimming) {
-                breathBrightness -= breathSpeed;
-                if (breathBrightness <= 0.0f) {
-                    breathBrightness = 0.0f;
-                    breathDimming = false;
-                    breathColorCycle++;
-                }
-            } else {
-                breathBrightness += breathSpeed;
-                if (breathBrightness >= 0.5f) {
-                    breathBrightness = 0.5f;
-                    breathDimming = true;
-                    breathColorCycle++;
-                }
-            }
-
-            // Cycle through 4 colors, 2 full breath cycles each
-            RGB bc;
-            if (breathColorCycle <= 1)
-                bc = ColorMagenta;
-            else if (breathColorCycle <= 3)
-                bc = ColorRed;
-            else if (breathColorCycle <= 5)
-                bc = ColorGreen;
-            else if (breathColorCycle <= 7)
-                bc = ColorBlue;
-            else
-                { breathColorCycle = 0; bc = ColorMagenta; }
-
-            uint32_t v = bc.value(fmt, breathBrightness);
+            float b = getBreathBrightness(now);
+            uint32_t v = baseColor.value(fmt, b);
             for (int i = 0; i < count; i++) frame[i] = v;
         }
         break;
 
-    case 4: // AL_CUSTOM_EFFECT_RAINBOW — each LED a different rainbow phase
+    case LIGHT_EFFECT_RAINBOW:
         {
             for (int i = 0; i < count; i++) {
                 uint8_t phase = static_cast<uint8_t>(
@@ -700,38 +688,42 @@ void FightpadAmbientLEDAddon::renderAmbient(uint32_t now) {
                 RGB c = RGB::wheel(phase);
                 frame[i] = c.value(fmt, effectBrightness);
             }
-            // Advance & bounce wheel, matching Key Effect Rainbow.
-            if (wheelReverse) {
-                wheelFrame -= 1;
-                if (wheelFrame < 0) { wheelFrame = 1; wheelReverse = false; }
-            } else {
-                wheelFrame += 1;
-                if (wheelFrame > 255) { wheelFrame = 254; wheelReverse = true; }
-            }
         }
         break;
 
-    case 5: // AL_CUSTOM_EFFECT_BREATHING_COLOR — selected color breathing
+    case LIGHT_EFFECT_CHASE:
         {
-            float b = getBreathBrightness(now);
-            uint32_t v = baseColor.value(fmt, b);
-            for (int i = 0; i < count; i++) frame[i] = v;
+            const uint8_t chaseHead = chaseHeadForCycle(
+                now,
+                lightChaseStartedMs,
+                FIGHTPAD12SLIM_GP40_LIGHT_CHASE_CYCLE_MS,
+                count);
+            const uint8_t chaseHeads[2] = {
+                chaseHead,
+                static_cast<uint8_t>((chaseHead + count / 2U) % count),
+            };
+            const RGB chaseColor = RGB::wheel(static_cast<uint8_t>(wheelFrame));
+            static const float tailBrightness[3] = {0.80f, 0.25f, 0.05f};
+            for (uint8_t segment = 0; segment < 2; segment++) {
+                for (uint8_t i = 0; i < 3; i++) {
+                    const uint8_t idx = static_cast<uint8_t>(
+                        (chaseHeads[segment] + count - i) % count);
+                    frame[idx] = chaseColor.value(fmt, tailBrightness[i]);
+                }
+            }
         }
         break;
     }
-    lastAmbientEffect = effect;
 }
 
 // ── Button LED effects (GP22, 12 LEDs) ─────────────────────────────────
 
 void FightpadAmbientLEDAddon::renderButtons(uint32_t now) {
-    extern volatile uint8_t g_menuRgbTop;
     extern volatile uint8_t g_menuRgbButton;
-    extern volatile uint8_t g_menuButtonEffect;
 
-    // Base color (menu override or default white)
-    RGB baseColor = (g_menuRgbTop != 0xFF)
-        ? menuIndexToColor(g_menuRgbTop)
+    // GP22 and GP40 consume the same runtime effect color.
+    RGB baseColor = (g_menuRgbEffectColor != 0xFF)
+        ? menuIndexToColor(g_menuRgbEffectColor)
         : ColorWhite;
     // Flash color (menu override or default white)
     RGB flashColor = (g_menuRgbButton != 0xFF)
@@ -743,13 +735,12 @@ void FightpadAmbientLEDAddon::renderButtons(uint32_t now) {
 
     uint32_t flashV = flashColor.value(fmt, 0.8f);
 
-    uint8_t effect = g_menuButtonEffect;
-    // 0xFF = never set by menu → use default static color.
-    if (effect == 0xFF) effect = 0;
+    uint8_t effect = g_menuLightEffect;
+    if (effect >= LIGHT_EFFECT_COUNT) effect = LIGHT_EFFECT_STATIC_COLOR;
 
     switch (effect) {
     default:
-    case 0: // EFFECT_STATIC_COLOR — fixed selected color + per-LED flash
+    case LIGHT_EFFECT_STATIC_COLOR:
         {
             uint32_t baseV = baseColor.value(fmt, effectBrightness);
             for (int i = 0; i < count; i++) {
@@ -758,62 +749,17 @@ void FightpadAmbientLEDAddon::renderButtons(uint32_t now) {
         }
         break;
 
-    case 1: // EFFECT_RAINBOW — each LED a different rainbow phase, fixed brightness
+    case LIGHT_EFFECT_GRADIENT:
         {
+            RGB c = RGB::wheel(static_cast<uint8_t>(wheelFrame));
+            uint32_t baseV = c.value(fmt, effectBrightness);
             for (int i = 0; i < count; i++) {
-                // Space LEDs across the color wheel
-                uint8_t phase = static_cast<uint8_t>(wheelFrame + i * 21);
-                RGB c = RGB::wheel(phase);
-                uint32_t baseV = c.value(fmt, effectBrightness);
-                frame_gp22[i] = (now < gp22FlashUntil[i]) ? flashV : baseV;
-            }
-            // Advance & bounce wheel
-            if (wheelReverse) {
-                wheelFrame -= 1;
-                if (wheelFrame < 0) { wheelFrame = 1; wheelReverse = false; }
-            } else {
-                wheelFrame += 1;
-                if (wheelFrame > 255) { wheelFrame = 254; wheelReverse = true; }
-            }
-        }
-        break;
-
-    case 2: // EFFECT_CHASE — 3 adjacent LEDs lit, brightness gradient
-        {
-            // Advance chase bright lead point every ~200 ms
-            if (now - buttonChaseLastMs >= 200) {
-                buttonChaseLastMs = now;
-                buttonChasePixel++;
-                if (buttonChasePixel >= count) buttonChasePixel = 0;
-                wheelFrame = static_cast<int16_t>((wheelFrame + 8) & 0xFF);
-            }
-            // Base: all off, but flash overlays win
-            for (int i = 0; i < count; i++) {
-                frame_gp22[i] = (now < gp22FlashUntil[i]) ? flashV : 0;
-            }
-            // New LEDs enter bright, then fade as the chase moves forward.
-            static const float grad[3] = {0.60f, 0.25f, 0.05f};
-            for (int i = 0; i < 3; i++) {
-                int idx = (buttonChasePixel + count - i) % count;
-                uint32_t cv = chaseColorFor(idx, count, wheelFrame).value(fmt, grad[i]);
-                frame_gp22[idx] = (now < gp22FlashUntil[idx]) ? flashV : cv;
-            }
-        }
-        break;
-
-    case 3: // EFFECT_STATIC_THEME — legacy hidden menu option
-        {
-            constexpr int COLS = 8;
-            int themeIdx = 0;
-            for (int i = 0; i < count; i++) {
-                uint32_t baseV = kAmbientThemeRows[themeIdx][i % COLS]
-                    .value(fmt, 0.5f);
                 frame_gp22[i] = (now < gp22FlashUntil[i]) ? flashV : baseV;
             }
         }
         break;
 
-    case 4: // EFFECT_BREATHING — selected color breathing + per-LED flash
+    case LIGHT_EFFECT_BREATHING:
         {
             float b = getBreathBrightness(now);
             uint32_t baseV = baseColor.value(fmt, b);
@@ -823,43 +769,38 @@ void FightpadAmbientLEDAddon::renderButtons(uint32_t now) {
         }
         break;
 
-    case 5: // EFFECT_BREATHING_RAINBOW — color cycling breathing + per-LED flash
+    case LIGHT_EFFECT_RAINBOW:
         {
-            float b = getBreathBrightness(now);
-            uint8_t phase = static_cast<uint8_t>((now / 40U) & 0xFFU);
-            RGB c = RGB::wheel(phase);
-            uint32_t baseV = c.value(fmt, b);
             for (int i = 0; i < count; i++) {
+                uint8_t phase = static_cast<uint8_t>(
+                    wheelFrame + ((i * 256U) / count));
+                RGB c = RGB::wheel(phase);
+                uint32_t baseV = c.value(fmt, effectBrightness);
                 frame_gp22[i] = (now < gp22FlashUntil[i]) ? flashV : baseV;
             }
         }
         break;
 
-    case 6: // EFFECT_GRADIENT — all LEDs same shifting rainbow + per-LED flash
+    case LIGHT_EFFECT_CHASE:
         {
-            RGB c = RGB::wheel(static_cast<uint8_t>(buttonGradientFrame));
-            uint32_t baseV = c.value(fmt, effectBrightness);
+            const uint8_t chaseHead = chaseHeadForCycle(
+                now,
+                lightChaseStartedMs,
+                FIGHTPAD12SLIM_GP22_LIGHT_CHASE_CYCLE_MS,
+                count);
+            const RGB chaseColor = RGB::wheel(static_cast<uint8_t>(wheelFrame));
             for (int i = 0; i < count; i++) {
-                frame_gp22[i] = (now < gp22FlashUntil[i]) ? flashV : baseV;
+                frame_gp22[i] = (now < gp22FlashUntil[i]) ? flashV : 0;
             }
-
-            // Match Base Gradient's step and bounce without sharing its phase state.
-            if (buttonGradientReverse) {
-                buttonGradientFrame -= 2;
-                if (buttonGradientFrame < 0) {
-                    buttonGradientFrame = 1;
-                    buttonGradientReverse = false;
-                }
-            } else {
-                buttonGradientFrame += 2;
-                if (buttonGradientFrame > 255) {
-                    buttonGradientFrame = 254;
-                    buttonGradientReverse = true;
-                }
+            static const float tailBrightness[3] = {0.80f, 0.25f, 0.05f};
+            for (uint8_t i = 0; i < 3; i++) {
+                const uint8_t idx = static_cast<uint8_t>(
+                    (chaseHead + count - i) % count);
+                const uint32_t value = chaseColor.value(fmt, tailBrightness[i]);
+                frame_gp22[idx] = (now < gp22FlashUntil[idx]) ? flashV : value;
             }
         }
         break;
-
     }
 }
 
@@ -867,7 +808,8 @@ void FightpadAmbientLEDAddon::show() {
     // Final writer guard: setup/diagnostic paths can call show() without first
     // passing through render().  A disabled menu request and the <=7% battery
     // cutoff both send one final black frame before GP24 is pulled inactive.
-    const bool outputEnabled = (enabled || bluetoothStatusLightRequired) &&
+    const bool outputEnabled = !g_scrollWheelRebootBlackout &&
+        (enabled || bluetoothStatusLightRequired) &&
         !FightpadBQ27220BatteryAddon::isLowBatteryLightCutoffActive();
     if (!outputEnabled) {
         clearFrame();

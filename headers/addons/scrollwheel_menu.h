@@ -56,17 +56,28 @@ static constexpr uint32_t SCROLLWHEEL_GAMEPLAY_GPIO_MASK = 0x001FFFFCu;
 
 enum class SWMenuLevel : uint8_t {
     MAIN          = 0,  // Level 0: RP2350, ESP32C6, RGB Customize (+ optional Battery Info)
-    RGB_SUB       = 1,  // Level 1: Button, ButtonEffect, AmbientEffect, OFF
+    RGB_SUB       = 1,  // Level 1: Key Flash, Light Effect, Brightness, All OFF
     COLOR         = 2,  // Level 2: color names (Button RGB flash)
     INFO          = 3,  // Info pages (RP2350/ESP32C6)
-    BUTTON_EFFECT = 4,  // Level 2: AnimationEffects picker
-    AMBIENT_EFFECT= 5,  // Level 2: AmbientEffectType picker
-    COLOR_BTN     = 6,  // Level 3: color picker under Button LED Effect -> Static Color
-    COLOR_AMB     = 7,  // Level 3: color picker under Ambient LED Effect -> Static Color
-    COLOR_BTN_BREATH = 8, // Level 3: color picker under Button LED Effect -> Breathing
-    COLOR_AMB_BREATH = 9, // Level 3: color picker under Ambient LED Effect -> Breathing
+    LIGHT_EFFECT  = 4,  // Level 2: shared GP22/GP40 effect picker
+    COLOR_EFFECT  = 6,  // Level 3: shared color picker under Static Color
+    COLOR_EFFECT_BREATH = 8, // Level 3: shared color picker under Breathing
     BATTERY_INFO  = 10, // Battery runtime/config/calibration/charge pages
     BRIGHTNESS    = 11, // Level 2: shared Key/Base effect brightness
+    CONTROLLER_TYPE = 12, // Level 1: upstream wired USB input mode picker
+};
+
+// Unified runtime effect IDs used by both the GP22 Key chain and GP40 Base
+// chain. The legacy protobuf fields use different IDs and are translated at
+// the scrollwheel persistence boundary.
+enum SWLightEffect : uint8_t {
+    LIGHT_EFFECT_STATIC_COLOR = 0,
+    LIGHT_EFFECT_GRADIENT     = 1,
+    LIGHT_EFFECT_BREATHING    = 2,
+    LIGHT_EFFECT_RAINBOW      = 3,
+    LIGHT_EFFECT_CHASE        = 4,
+    LIGHT_EFFECT_COUNT        = 5,
+    LIGHT_EFFECT_UNSET        = 0xFF,
 };
 
 static constexpr uint8_t SW_BATTERY_PAGE_COUNT = 4;
@@ -89,14 +100,14 @@ extern const uint8_t      kMenuRgbSubCount;
 extern const SWMenuItem kMenuColors[];
 extern const uint8_t      kMenuColorsCount;
 
-extern const SWMenuItem kMenuButtonEffects[];
-extern const uint8_t      kMenuButtonEffectsCount;
-
-extern const SWMenuItem kMenuAmbientEffects[];
-extern const uint8_t      kMenuAmbientEffectsCount;
+extern const SWMenuItem kMenuLightEffects[];
+extern const uint8_t      kMenuLightEffectsCount;
 
 extern const SWMenuItem kMenuBrightness[];
 extern const uint8_t      kMenuBrightnessCount;
+
+extern const SWMenuItem kMenuControllerTypes[];
+extern const uint8_t      kMenuControllerTypesCount;
 
 // ── Cross-core state ─────────────────────────────────────────────────────
 
@@ -131,7 +142,8 @@ extern volatile bool g_scrollWheelButtonBusy;
 // when the button release follows a long press (menu enter or exit).
 extern volatile bool g_scrollWheelButtonLongPressed;
 
-// Last raw edge seen on GP30/GP31/GP32. Written by Core0 and read by Core1.
+// Last activity from GP2..GP20 or raw edge on GP30/GP31/GP32.
+// Written by Core0 and read by Core1 to control Fightpad OLED idle sleep.
 extern std::atomic<uint32_t> g_scrollWheelLastActivityMs;
 
 // ── RGB color overrides set from the menu ───────────────────────────────
@@ -141,24 +153,27 @@ extern std::atomic<uint32_t> g_scrollWheelLastActivityMs;
 //  4 = ColorYellow, 5 = ColorLimeGreen, 6 = ColorGreen, 7 = ColorSeafoam,
 //  8 = ColorAqua, 9 = ColorSkyBlue, 10 = ColorBlue, 11 = ColorPurple,
 //  12 = ColorPink, 13 = ColorMagenta, 14 = ColorIndigo, 15 = ColorViolet.
-extern volatile uint8_t g_menuRgbTop;     // GP22 12-LED chain
-extern volatile uint8_t g_menuRgbBottom;  // GP40 19-LED chain
+extern volatile uint8_t g_menuRgbEffectColor; // shared GP22/GP40 effect color
 extern volatile uint8_t g_menuRgbButton;  // button-press flash color
 
-// Target being configured while the COLOR level is shown.
-// 0 = Top Board, 1 = Bottom Board, 2 = Button.  Set on entry from RGB_SUB.
-extern volatile uint8_t g_menuRgbTarget;
-
-// ── RGB effect overrides set from the menu ──────────────────────────────
-// 0xFF = not set (use default static color).
-// Button uses 0-6; ambient uses 0-5.
-extern volatile uint8_t g_menuButtonEffect;   // GP22 button LED effect
-extern volatile uint8_t g_menuAmbientEffect;  // GP40 ambient LED effect
+// ── Shared RGB effect override set from the menu ────────────────────────
+// Uses SWLightEffect. 0xFF is reserved for the persisted All OFF state.
+extern volatile uint8_t g_menuLightEffect;
 
 // Runtime request for the shared GP22/GP40 RGB power rail.  The menu only
 // changes this request; FightpadAmbientLEDAddon remains the sole GP24 writer.
 // "All OFF" clears it and selecting a visible color/effect sets it again.
 extern volatile bool g_menuRgbPowerEnabled;
+
+// Persisted GP30 master switch for normal Light Effect and Key Flash output.
+// It is intentionally separate from the menu's existing destructive All OFF
+// state. Bluetooth GP40 status feedback may still request temporary light
+// output while this switch is false.
+extern volatile bool g_manualLightEffectsEnabled;
+
+// One-shot RAM-only blackout used to make a pending Controller Type reboot
+// visible. It is never persisted, so the saved light effect returns on boot.
+extern volatile bool g_scrollWheelRebootBlackout;
 
 // Shared brightness for Key/Base Static Color, Gradient and Rainbow.
 // 0 = Bright (0.5f), 1 = Normal (0.3f), 2 = Dim (0.1f).
@@ -190,7 +205,7 @@ private:
     // Menu navigation
     void navUp();       // GP31 edge → move cursor up
     void navDown();     // GP32 edge → move cursor down
-    void navSelect();   // GP30 short press → enter/back
+    void navSelect();   // GP30 short press -> runtime lights/menu select
     void navToggle();   // GP30 long press → enter/exit menu
     void navBack();     // GP19 short press → back one level / exit
 

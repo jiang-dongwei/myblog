@@ -1,0 +1,17 @@
+{
+  "discussion_id": "2026-08-07-controller-mode-visible-reboot",
+  "created_at": "2026-08-07",
+  "current_phase": 5,
+  "phases": {
+    "split": "completed",
+    "requirements": "completed",
+    "hardware": "completed",
+    "brainstorm": "completed",
+    "milestones": "completed"
+  },
+  "subsystems": [
+    "controller mode reboot feedback",
+    "Fightpad LED final output"
+  ],
+  "current_subsystem": 0
+}

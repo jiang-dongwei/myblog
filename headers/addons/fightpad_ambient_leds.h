@@ -86,6 +86,20 @@
 #define FIGHTPAD12SLIM_ESP32_BT_STATUS_DUAL_CHASE 0
 #endif
 
+// Normal menu Chase color cadence and per-chain full-cycle timing. Bluetooth
+// Pairing/Connecting has its own fixed 50 ms timing and remains independent.
+#ifndef FIGHTPAD12SLIM_LIGHT_CHASE_STEP_MS
+#define FIGHTPAD12SLIM_LIGHT_CHASE_STEP_MS 100
+#endif
+
+#ifndef FIGHTPAD12SLIM_GP22_LIGHT_CHASE_CYCLE_MS
+#define FIGHTPAD12SLIM_GP22_LIGHT_CHASE_CYCLE_MS 2000
+#endif
+
+#ifndef FIGHTPAD12SLIM_GP40_LIGHT_CHASE_CYCLE_MS
+#define FIGHTPAD12SLIM_GP40_LIGHT_CHASE_CYCLE_MS 2000
+#endif
+
 #ifndef FIGHTPAD12SLIM_BUTTON_LEDS_COUNT
 #define FIGHTPAD12SLIM_BUTTON_LEDS_COUNT 12
 #endif
@@ -201,6 +215,7 @@ private:
     void previousEffect();
     void nextEffect();
     void render(uint32_t now);
+    void updateLightEffectAnimation(uint32_t now);
     void renderAmbient(uint32_t now);   // GP40 19-LED chain effects
     void renderBluetoothStatusAmbient(uint8_t status, uint32_t elapsedMs);
     void renderButtons(uint32_t now);   // GP22 12-LED chain effects
@@ -231,19 +246,12 @@ private:
     bool bluetoothStatusLightRequired = false;
 
     // ── Effect animation state ──────────────────────────────
-    int16_t  wheelFrame = 0;          // rainbow color wheel position (0-255, signed for bounce)
-    bool     wheelReverse = false;    // bounce direction
-    int16_t  buttonGradientFrame = 0; // GP22 Gradient color wheel position
-    bool     buttonGradientReverse = false; // GP22 Gradient bounce direction
-    uint8_t  ambientChasePixel = 0;   // GP40 chase head position
-    uint32_t ambientChaseLastMs = 0;  // GP40 last chase advance timestamp
-    uint8_t  buttonChasePixel = 0;    // GP22 bright chase lead position
-    uint32_t buttonChaseLastMs = 0;   // GP22 last chase advance timestamp
-    float    breathBrightness = 0.0f; // breathing brightness
-    bool     breathDimming = false;   // start brightening (dim → bright)
-    uint8_t  breathColorCycle = 0;    // breath color cycle counter
-    uint8_t  lastAmbientEffect = 0xFF; // tracks previous ambient effect for reset
-    uint8_t  lastButtonEffect  = 0xFF; // tracks previous button effect for reset
+    int16_t  wheelFrame = 0;            // shared rainbow/gradient/chase hue (0-255)
+    bool     wheelReverse = false;      // shared Gradient/Rainbow bounce direction
+    uint32_t wheelLastMs = 0;           // last shared Gradient/Rainbow update
+    uint32_t lightChaseStartedMs = 0;   // shared epoch; each chain maps it to its own cycle
+    uint32_t lightChaseLastMs = 0;      // last normal Chase hue advance timestamp
+    uint8_t  lastLightEffect = 0xFF;    // resets shared phase when mode changes
 };
 
 #endif

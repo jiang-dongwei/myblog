@@ -10,8 +10,7 @@
 
 // ── Menu data tables ─────────────────────────────────────────────────────
 
-static constexpr uint8_t RGB_SUB_KEY_FLASH_INDEX = 0;
-static constexpr uint8_t RGB_SUB_ALL_OFF_INDEX = 4;
+static constexpr uint8_t RGB_SUB_ALL_OFF_INDEX = 3;
 static constexpr uint8_t BRIGHTNESS_LEVEL_COUNT = 3;
 static constexpr uint32_t GAMEPLAY_INPUT_RELEASE_MS = 30;
 
@@ -25,6 +24,53 @@ enum class GameplayInputLockState : uint8_t {
 GameplayInputLockState gameplayInputLockState = GameplayInputLockState::UNLOCKED;
 bool gameplayReleaseTimerRunning = false;
 uint32_t gameplayReleaseStartMs = 0;
+
+uint8_t legacyButtonEffectToLightEffect(uint8_t effect) {
+    switch (effect) {
+        case 0: return LIGHT_EFFECT_STATIC_COLOR;
+        case 6: return LIGHT_EFFECT_GRADIENT;
+        case 4: return LIGHT_EFFECT_BREATHING;
+        case 1: return LIGHT_EFFECT_RAINBOW;
+        case 2: return LIGHT_EFFECT_CHASE;
+        case 3: return LIGHT_EFFECT_STATIC_COLOR; // legacy Static Theme
+        case 5: return LIGHT_EFFECT_RAINBOW;      // legacy Breathing Rainbow
+        default: return LIGHT_EFFECT_UNSET;
+    }
+}
+
+uint8_t legacyAmbientEffectToLightEffect(uint8_t effect) {
+    switch (effect) {
+        case 0: return LIGHT_EFFECT_STATIC_COLOR;
+        case 1: return LIGHT_EFFECT_GRADIENT;
+        case 5: return LIGHT_EFFECT_BREATHING;
+        case 4: return LIGHT_EFFECT_RAINBOW;
+        case 2: return LIGHT_EFFECT_CHASE;
+        case 3: return LIGHT_EFFECT_RAINBOW; // legacy Breathing Rainbow
+        default: return LIGHT_EFFECT_UNSET;
+    }
+}
+
+uint8_t lightEffectToLegacyButtonEffect(uint8_t effect) {
+    switch (effect) {
+        case LIGHT_EFFECT_STATIC_COLOR: return 0;
+        case LIGHT_EFFECT_GRADIENT:     return 6;
+        case LIGHT_EFFECT_BREATHING:    return 4;
+        case LIGHT_EFFECT_RAINBOW:      return 1;
+        case LIGHT_EFFECT_CHASE:        return 2;
+        default:                        return 0xFF;
+    }
+}
+
+uint8_t lightEffectToLegacyAmbientEffect(uint8_t effect) {
+    switch (effect) {
+        case LIGHT_EFFECT_STATIC_COLOR: return 0;
+        case LIGHT_EFFECT_GRADIENT:     return 1;
+        case LIGHT_EFFECT_BREATHING:    return 5;
+        case LIGHT_EFFECT_RAINBOW:      return 4;
+        case LIGHT_EFFECT_CHASE:        return 2;
+        default:                        return 0xFF;
+    }
+}
 } // namespace
 
 const SWMenuItem kMenuMain[] = {
@@ -34,20 +80,35 @@ const SWMenuItem kMenuMain[] = {
     { "Battery Info",       SWMenuLevel::BATTERY_INFO, 0 },
 #endif
     { "RGB Customize",      SWMenuLevel::RGB_SUB, 0 },
+    { "Controller Type",    SWMenuLevel::CONTROLLER_TYPE, 0 },
 };
 const uint8_t kMenuMainCount = sizeof(kMenuMain) / sizeof(kMenuMain[0]);
 
+// Keep this list limited to input modes implemented by upstream GP2040-CE.
+// Arcade Stick is an InputModeDeviceType, not a standalone USB InputMode.
+const SWMenuItem kMenuControllerTypes[] = {
+    { "XBOX",        SWMenuLevel::INFO, INPUT_MODE_XINPUT },
+    { "PS3",         SWMenuLevel::INFO, INPUT_MODE_PS3 },
+    { "PS4",         SWMenuLevel::INFO, INPUT_MODE_PS4 },
+    { "PS5",         SWMenuLevel::INFO, INPUT_MODE_PS5 },
+    { "SWITCH",      SWMenuLevel::INFO, INPUT_MODE_SWITCH },
+    { "SWITCH PRO",  SWMenuLevel::INFO, INPUT_MODE_SWITCH_PRO },
+    { "KEYBOARD",    SWMenuLevel::INFO, INPUT_MODE_KEYBOARD },
+    { "GENERIC HID", SWMenuLevel::INFO, INPUT_MODE_GENERIC },
+};
+const uint8_t kMenuControllerTypesCount =
+    sizeof(kMenuControllerTypes) / sizeof(kMenuControllerTypes[0]);
+
 const SWMenuItem kMenuRgbSub[] = {
     { "Key Flash",           SWMenuLevel::COLOR,  0 },
-    { "Key Effect",          SWMenuLevel::BUTTON_EFFECT,  0 },
-    { "Base Effect",         SWMenuLevel::AMBIENT_EFFECT, 0 },
+    { "Light Effect",        SWMenuLevel::LIGHT_EFFECT, 0 },
     { "Brightness",          SWMenuLevel::BRIGHTNESS, 0 },
     { "All OFF",             SWMenuLevel::INFO,   0 },  // immediate action, no sub-level
 };
 const uint8_t kMenuRgbSubCount = sizeof(kMenuRgbSub) / sizeof(kMenuRgbSub[0]);
 
 // COLOR items use `targetIndex` to carry the AnimationStation `colors`
-// vector index so that g_menuRgbTop/Bottom/Button values match proto
+// vector index so that the shared effect/flash values match proto
 // AnimationOptions.staticColorIndex / buttonColorIndex encoding.
 //   0=Black(OFF), 1=White, 2=Red, 3=Orange, 4=Yellow, 5=LimeGreen,
 //   6=Green, 7=Seafoam, 8=Aqua(Cyan), 9=SkyBlue, 10=Blue, 11=Purple.
@@ -64,27 +125,16 @@ const SWMenuItem kMenuColors[] = {
 };
 const uint8_t kMenuColorsCount = sizeof(kMenuColors) / sizeof(kMenuColors[0]);
 
-// Button LED effect picker. Existing render indices remain stable:
-// 0=Static Color, 1=Rainbow, 2=Chase, 4=Breathing, 6=Gradient.
-const SWMenuItem kMenuButtonEffects[] = {
-    { "Static Color", SWMenuLevel::COLOR_BTN,        0 },
-    { "Gradient",     SWMenuLevel::INFO,             6 },
-    { "Breathing",    SWMenuLevel::COLOR_BTN_BREATH, 4 },
-    { "Rainbow",      SWMenuLevel::INFO,             1 },
-    { "Chase",        SWMenuLevel::INFO,             2 },
+// Unified Key/Base effect picker. targetIndex uses SWLightEffect IDs; legacy
+// Key/Base protobuf indices are translated only while loading and saving.
+const SWMenuItem kMenuLightEffects[] = {
+    { "Static Color", SWMenuLevel::COLOR_EFFECT,        LIGHT_EFFECT_STATIC_COLOR },
+    { "Gradient",     SWMenuLevel::INFO,                LIGHT_EFFECT_GRADIENT },
+    { "Breathing",    SWMenuLevel::COLOR_EFFECT_BREATH, LIGHT_EFFECT_BREATHING },
+    { "Rainbow",      SWMenuLevel::INFO,                LIGHT_EFFECT_RAINBOW },
+    { "Chase",        SWMenuLevel::INFO,                LIGHT_EFFECT_CHASE },
 };
-const uint8_t kMenuButtonEffectsCount = sizeof(kMenuButtonEffects) / sizeof(kMenuButtonEffects[0]);
-
-// Ambient LED effect picker. Existing indices remain stable:
-// 0=Static Color, 1=Gradient, 2=Chase, 4=Rainbow, 5=Breathing.
-const SWMenuItem kMenuAmbientEffects[] = {
-    { "Static Color", SWMenuLevel::COLOR_AMB,        0 },
-    { "Gradient",     SWMenuLevel::INFO,             1 },
-    { "Chase",        SWMenuLevel::INFO,             2 },
-    { "Breathing",    SWMenuLevel::COLOR_AMB_BREATH, 5 },
-    { "Rainbow",      SWMenuLevel::INFO,             4 },
-};
-const uint8_t kMenuAmbientEffectsCount = sizeof(kMenuAmbientEffects) / sizeof(kMenuAmbientEffects[0]);
+const uint8_t kMenuLightEffectsCount = sizeof(kMenuLightEffects) / sizeof(kMenuLightEffects[0]);
 
 const SWMenuItem kMenuBrightness[] = {
     { "Bright", SWMenuLevel::INFO, 0 },
@@ -101,14 +151,13 @@ volatile bool g_scrollWheelMenuActive = false;
 volatile bool g_scrollWheelButtonBusy = false;
 volatile bool g_scrollWheelButtonLongPressed = false;
 std::atomic<uint32_t> g_scrollWheelLastActivityMs { 0 };
-volatile uint8_t g_menuRgbTop    = 0xFF;
-volatile uint8_t g_menuRgbBottom = 0xFF;
+volatile uint8_t g_menuRgbEffectColor = 0xFF;
 volatile uint8_t g_menuRgbButton = 0xFF;
-volatile uint8_t g_menuRgbTarget = 0;
-volatile uint8_t g_menuButtonEffect  = 0xFF;
-volatile uint8_t g_menuAmbientEffect = 0xFF;
+volatile uint8_t g_menuLightEffect = LIGHT_EFFECT_UNSET;
 volatile uint8_t g_menuBrightnessLevel = 0;
 volatile bool g_menuRgbPowerEnabled = true;
+volatile bool g_manualLightEffectsEnabled = true;
+volatile bool g_scrollWheelRebootBlackout = false;
 
 bool isScrollWheelGameplayInputLocked() {
     return gameplayInputLockState != GameplayInputLockState::UNLOCKED;
@@ -163,36 +212,50 @@ void ScrollWheelMenuAddon::setup() {
     g_menuState.scrollOffset = 0;
     g_menuStateDirty = false;
     g_scrollWheelMenuActive = false;
+    g_scrollWheelRebootBlackout = false;
     gameplayInputLockState = GameplayInputLockState::UNLOCKED;
     gameplayReleaseTimerRunning = false;
     gameplayReleaseStartMs = 0;
     g_scrollWheelLastActivityMs.store(getMillis(), std::memory_order_release);
 
-    // Restore menu color overrides from flash (0xFF = never set).
+    // Restore and normalize the old two-effect/two-color persistence layout.
+    // The unified runtime state gives Key precedence when legacy values differ.
     FightpadAmbientLEDOptions& opts = Storage::getInstance().getFightpadAmbientLEDOptions();
-    if (opts.topBoardColorIndex != 0xFF)
-        g_menuRgbTop = static_cast<uint8_t>(opts.topBoardColorIndex);
-    if (opts.bottomBoardColorIndex != 0xFF)
-        g_menuRgbBottom = static_cast<uint8_t>(opts.bottomBoardColorIndex);
-    if (opts.buttonFlashColorIndex != 0xFF)
-        g_menuRgbButton = static_cast<uint8_t>(opts.buttonFlashColorIndex);
-    if (opts.buttonEffectIndex != 0xFF)
-        g_menuButtonEffect = static_cast<uint8_t>(opts.buttonEffectIndex);
-    if (opts.ambientEffectIndex != 0xFF)
-        g_menuAmbientEffect = static_cast<uint8_t>(opts.ambientEffectIndex);
+    const uint8_t storedTop = static_cast<uint8_t>(opts.topBoardColorIndex);
+    const uint8_t storedBottom = static_cast<uint8_t>(opts.bottomBoardColorIndex);
+    const uint8_t storedFlash = static_cast<uint8_t>(opts.buttonFlashColorIndex);
+    const uint8_t storedButtonEffect = static_cast<uint8_t>(opts.buttonEffectIndex);
+    const uint8_t storedAmbientEffect = static_cast<uint8_t>(opts.ambientEffectIndex);
+    const bool persistedAllOff =
+        storedTop == 0 &&
+        storedBottom == 0 &&
+        storedFlash == 0 &&
+        storedButtonEffect == 0xFF &&
+        storedAmbientEffect == 0xFF;
+
+    const uint8_t sharedColor = (storedTop != 0xFF) ? storedTop : storedBottom;
+    g_menuRgbEffectColor = sharedColor;
+    g_menuRgbButton = storedFlash;
+
+    if (persistedAllOff) {
+        g_menuLightEffect = LIGHT_EFFECT_UNSET;
+    } else {
+        g_menuLightEffect = legacyButtonEffectToLightEffect(storedButtonEffect);
+        if (g_menuLightEffect == LIGHT_EFFECT_UNSET) {
+            g_menuLightEffect = legacyAmbientEffectToLightEffect(storedAmbientEffect);
+        }
+        if (g_menuLightEffect == LIGHT_EFFECT_UNSET) {
+            g_menuLightEffect = LIGHT_EFFECT_STATIC_COLOR;
+        }
+    }
     g_menuBrightnessLevel = (opts.brightnessLevel < BRIGHTNESS_LEVEL_COUNT)
         ? static_cast<uint8_t>(opts.brightnessLevel)
         : 0;
+    g_manualLightEffectsEnabled = opts.manualLightEffectsEnabled;
 
-    // "All OFF" is already persisted as three black colors plus default
-    // static effects.  Reconstruct the runtime rail request without changing
-    // the protobuf layout, so existing saved configurations stay compatible.
-    g_menuRgbPowerEnabled = !(
-        g_menuRgbTop == 0 &&
-        g_menuRgbBottom == 0 &&
-        g_menuRgbButton == 0 &&
-        g_menuButtonEffect == 0xFF &&
-        g_menuAmbientEffect == 0xFF);
+    // "All OFF" is persisted as three black colors plus two unset legacy
+    // effects. Reconstruct the rail request without changing protobuf layout.
+    g_menuRgbPowerEnabled = !persistedAllOff;
 
     printf("[ScrollWheel] Setup OK. Pins: SW=%d A=%d B=%d\n",
            SCROLLWHEEL_PIN_SW, SCROLLWHEEL_PIN_A, SCROLLWHEEL_PIN_B);
@@ -205,14 +268,12 @@ const SWMenuItem* ScrollWheelMenuAddon::currentMenuTable() const {
         case SWMenuLevel::MAIN:           return kMenuMain;
         case SWMenuLevel::RGB_SUB:        return kMenuRgbSub;
         case SWMenuLevel::COLOR:
-        case SWMenuLevel::COLOR_BTN:
-        case SWMenuLevel::COLOR_AMB:
-        case SWMenuLevel::COLOR_BTN_BREATH:
-        case SWMenuLevel::COLOR_AMB_BREATH:
+        case SWMenuLevel::COLOR_EFFECT:
+        case SWMenuLevel::COLOR_EFFECT_BREATH:
                                              return kMenuColors;
-        case SWMenuLevel::BUTTON_EFFECT:  return kMenuButtonEffects;
-        case SWMenuLevel::AMBIENT_EFFECT: return kMenuAmbientEffects;
+        case SWMenuLevel::LIGHT_EFFECT:   return kMenuLightEffects;
         case SWMenuLevel::BRIGHTNESS:     return kMenuBrightness;
+        case SWMenuLevel::CONTROLLER_TYPE:return kMenuControllerTypes;
         case SWMenuLevel::BATTERY_INFO:   return kMenuMain;
         default:                          return kMenuMain;
     }
@@ -223,14 +284,12 @@ uint8_t ScrollWheelMenuAddon::currentItemCount() const {
         case SWMenuLevel::MAIN:           return kMenuMainCount;
         case SWMenuLevel::RGB_SUB:        return kMenuRgbSubCount;
         case SWMenuLevel::COLOR:
-        case SWMenuLevel::COLOR_BTN:
-        case SWMenuLevel::COLOR_AMB:
-        case SWMenuLevel::COLOR_BTN_BREATH:
-        case SWMenuLevel::COLOR_AMB_BREATH:
+        case SWMenuLevel::COLOR_EFFECT:
+        case SWMenuLevel::COLOR_EFFECT_BREATH:
                                              return kMenuColorsCount;
-        case SWMenuLevel::BUTTON_EFFECT:  return kMenuButtonEffectsCount;
-        case SWMenuLevel::AMBIENT_EFFECT: return kMenuAmbientEffectsCount;
+        case SWMenuLevel::LIGHT_EFFECT:   return kMenuLightEffectsCount;
         case SWMenuLevel::BRIGHTNESS:     return kMenuBrightnessCount;
+        case SWMenuLevel::CONTROLLER_TYPE:return kMenuControllerTypesCount;
         case SWMenuLevel::BATTERY_INFO:   return SW_BATTERY_PAGE_COUNT;
         default:                          return kMenuMainCount;
     }
@@ -240,17 +299,18 @@ static void markMenuDirty() {
     g_menuStateDirty = true;
 }
 
-// Write the three color-override variables + effect indices to config
-// and trigger a flash commit.  Follows the same pattern as
+// Mirror the shared runtime color/effect into the two legacy Key/Base fields
+// and trigger a flash commit. Follows the same pattern as
 // StaticColor::SaveIndexOptions() + AnimationStation::HandleEvent().
 static void persistConfig() {
     FightpadAmbientLEDOptions& opts = Storage::getInstance().getFightpadAmbientLEDOptions();
-    opts.topBoardColorIndex    = g_menuRgbTop;
-    opts.bottomBoardColorIndex = g_menuRgbBottom;
+    opts.topBoardColorIndex    = g_menuRgbEffectColor;
+    opts.bottomBoardColorIndex = g_menuRgbEffectColor;
     opts.buttonFlashColorIndex = g_menuRgbButton;
-    opts.buttonEffectIndex     = g_menuButtonEffect;
-    opts.ambientEffectIndex    = g_menuAmbientEffect;
+    opts.buttonEffectIndex     = lightEffectToLegacyButtonEffect(g_menuLightEffect);
+    opts.ambientEffectIndex    = lightEffectToLegacyAmbientEffect(g_menuLightEffect);
     opts.brightnessLevel       = g_menuBrightnessLevel;
+    opts.manualLightEffectsEnabled = g_manualLightEffectsEnabled;
     EventManager::getInstance().triggerEvent(new GPStorageSaveEvent(false));
 }
 
@@ -260,14 +320,12 @@ static void clampScrollOffset() {
         case SWMenuLevel::MAIN:           count = kMenuMainCount; break;
         case SWMenuLevel::RGB_SUB:        count = kMenuRgbSubCount; break;
         case SWMenuLevel::COLOR:
-        case SWMenuLevel::COLOR_BTN:
-        case SWMenuLevel::COLOR_AMB:
-        case SWMenuLevel::COLOR_BTN_BREATH:
-        case SWMenuLevel::COLOR_AMB_BREATH:
+        case SWMenuLevel::COLOR_EFFECT:
+        case SWMenuLevel::COLOR_EFFECT_BREATH:
                                              count = kMenuColorsCount; break;
-        case SWMenuLevel::BUTTON_EFFECT:  count = kMenuButtonEffectsCount; break;
-        case SWMenuLevel::AMBIENT_EFFECT: count = kMenuAmbientEffectsCount; break;
+        case SWMenuLevel::LIGHT_EFFECT:   count = kMenuLightEffectsCount; break;
         case SWMenuLevel::BRIGHTNESS:     count = kMenuBrightnessCount; break;
+        case SWMenuLevel::CONTROLLER_TYPE:count = kMenuControllerTypesCount; break;
         case SWMenuLevel::BATTERY_INFO:   count = SW_BATTERY_PAGE_COUNT; break;
         default: return;
     }
@@ -301,7 +359,15 @@ void ScrollWheelMenuAddon::navDown() {
 }
 
 void ScrollWheelMenuAddon::navSelect() {
-    if (!g_menuState.active) return;
+    // Outside the menu, a completed GP30 short press is the runtime switch for
+    // normal Key/Base effects. The button FSM calls navSelect() only after a
+    // debounced release, and never after BTN_LONG, so the 2-second menu gesture
+    // remains mutually exclusive with this action.
+    if (!g_menuState.active) {
+        g_manualLightEffectsEnabled = !g_manualLightEffectsEnabled;
+        persistConfig();
+        return;
+    }
 
     SWMenuLevel currentLevel = static_cast<SWMenuLevel>(g_menuState.level);
     uint8_t idx = g_menuState.index;
@@ -316,13 +382,11 @@ void ScrollWheelMenuAddon::navSelect() {
     }
 
     // RGB_SUB "All OFF": immediate action — turn off all LEDs.
-    // Reset colors to black and effects to default (Static Color).
+    // Reset colors to black and persist both legacy effects as unset.
     if (currentLevel == SWMenuLevel::RGB_SUB && idx == RGB_SUB_ALL_OFF_INDEX) {
-        g_menuRgbTop    = 0;
-        g_menuRgbBottom = 0;
+        g_menuRgbEffectColor = 0;
         g_menuRgbButton = 0;
-        g_menuButtonEffect  = 0xFF;
-        g_menuAmbientEffect = 0xFF;
+        g_menuLightEffect = LIGHT_EFFECT_UNSET;
         g_menuRgbPowerEnabled = false;
         persistConfig();
         markMenuDirty();
@@ -342,107 +406,76 @@ void ScrollWheelMenuAddon::navSelect() {
         return;
     }
 
-    // COLOR is a terminal list level — short press applies the selected
-    // color's AnimationStation index (stored in targetIndex) to the target
+    // COLOR is the Key Flash terminal list — short press applies the selected
+    // AnimationStation index (stored in targetIndex) to the flash color
     // and stays on the same list so the user can try different colors
     // without re-entering.  Exit via long press or BACK.
     if (currentLevel == SWMenuLevel::COLOR) {
         const SWMenuItem* table = currentMenuTable();
         uint8_t colorIdx = table[idx].targetIndex;  // AnimationStation colors index
-        switch (g_menuRgbTarget) {
-            case 0: g_menuRgbTop    = colorIdx; break;
-            case 1: g_menuRgbBottom = colorIdx; break;
-            case 2: g_menuRgbButton = colorIdx; break;
-            default: break;
-        }
-        if (colorIdx != 0)
+        g_menuRgbButton = colorIdx;
+        if (colorIdx != 0) {
             g_menuRgbPowerEnabled = true;
+            g_manualLightEffectsEnabled = true;
+        }
         // Stay in COLOR — do not navigate back.
         persistConfig();
         markMenuDirty();
         return;
     }
 
-    // COLOR_BTN: color picker under Button LED Effect → Static Color.
-    // Short press applies the color to GP22 (top) and sets effect to Static Color.
-    if (currentLevel == SWMenuLevel::COLOR_BTN) {
+    // Shared effect color pickers apply to both GP22 and GP40. Static Color
+    // and Breathing differ only in which unified effect is selected.
+    if (currentLevel == SWMenuLevel::COLOR_EFFECT ||
+        currentLevel == SWMenuLevel::COLOR_EFFECT_BREATH) {
         const SWMenuItem* table = currentMenuTable();
         uint8_t colorIdx = table[idx].targetIndex;
-        g_menuRgbTop       = colorIdx;
-        g_menuButtonEffect = 0;               // enable Static Color effect
-        if (colorIdx != 0)
+        g_menuRgbEffectColor = colorIdx;
+        g_menuLightEffect = (currentLevel == SWMenuLevel::COLOR_EFFECT)
+            ? LIGHT_EFFECT_STATIC_COLOR
+            : LIGHT_EFFECT_BREATHING;
+        if (colorIdx != 0) {
             g_menuRgbPowerEnabled = true;
+            g_manualLightEffectsEnabled = true;
+        }
         persistConfig();
         markMenuDirty();
         return;
     }
 
-    // COLOR_AMB: color picker under Ambient LED Effect → Static Color.
-    // Short press applies the color to GP40 (bottom) and sets effect to Static Color.
-    if (currentLevel == SWMenuLevel::COLOR_AMB) {
-        const SWMenuItem* table = currentMenuTable();
-        uint8_t colorIdx = table[idx].targetIndex;
-        g_menuRgbBottom      = colorIdx;
-        g_menuAmbientEffect  = 0;             // enable Static Color effect
-        if (colorIdx != 0)
-            g_menuRgbPowerEnabled = true;
-        persistConfig();
-        markMenuDirty();
-        return;
-    }
-
-    // COLOR_BTN_BREATH: color picker under Button LED Effect -> Breathing.
-    if (currentLevel == SWMenuLevel::COLOR_BTN_BREATH) {
-        const SWMenuItem* table = currentMenuTable();
-        uint8_t colorIdx = table[idx].targetIndex;
-        g_menuRgbTop       = colorIdx;
-        g_menuButtonEffect = 4;               // enable Breathing effect
-        if (colorIdx != 0)
-            g_menuRgbPowerEnabled = true;
-        persistConfig();
-        markMenuDirty();
-        return;
-    }
-
-    // COLOR_AMB_BREATH: color picker under Ambient LED Effect -> Breathing.
-    if (currentLevel == SWMenuLevel::COLOR_AMB_BREATH) {
-        const SWMenuItem* table = currentMenuTable();
-        uint8_t colorIdx = table[idx].targetIndex;
-        g_menuRgbBottom      = colorIdx;
-        g_menuAmbientEffect  = 5;             // enable Breathing effect
-        if (colorIdx != 0)
-            g_menuRgbPowerEnabled = true;
-        persistConfig();
-        markMenuDirty();
-        return;
-    }
-
-    // BUTTON_EFFECT / AMBIENT_EFFECT: terminal effect items (targetLevel==INFO)
-    // apply the effect immediately.  Non-terminal items (e.g. Static Color →
-    // COLOR_BTN) fall through to the general navigation below.
-    if (currentLevel == SWMenuLevel::BUTTON_EFFECT ||
-        currentLevel == SWMenuLevel::AMBIENT_EFFECT) {
+    // LIGHT_EFFECT terminal items apply immediately. Static Color and
+    // Breathing fall through to their shared color pickers.
+    if (currentLevel == SWMenuLevel::LIGHT_EFFECT) {
         const SWMenuItem* table = currentMenuTable();
         const SWMenuItem& item = table[idx];
         if (item.targetLevel == SWMenuLevel::INFO) {
-            uint8_t effectIdx = item.targetIndex;
-            // Terminal effects apply immediately. Chase owns its dynamic color
-            // source, so drop any saved static-color override for that chain.
-            if (currentLevel == SWMenuLevel::BUTTON_EFFECT) {
-                g_menuButtonEffect = effectIdx;
-                if (effectIdx == 2)
-                    g_menuRgbTop = 0xFF; // Chase uses dynamic colors, not static color override.
-            } else {
-                g_menuAmbientEffect = effectIdx;
-                if (effectIdx == 2)
-                    g_menuRgbBottom = 0xFF; // Chase uses dynamic colors, not static color override.
-            }
+            g_menuLightEffect = item.targetIndex;
             g_menuRgbPowerEnabled = true;
+            g_manualLightEffectsEnabled = true;
             persistConfig();
             markMenuDirty();
             return;
         }
         // Non-terminal: fall through to general navigation.
+    }
+
+    // Controller Type directly reuses upstream InputMode values. A changed
+    // USB mode needs a forced flash save and reboot so the host sees the new
+    // descriptors on re-enumeration; selecting the active mode is a no-op.
+    if (currentLevel == SWMenuLevel::CONTROLLER_TYPE) {
+        const SWMenuItem* table = currentMenuTable();
+        InputMode selectedMode = static_cast<InputMode>(table[idx].targetIndex);
+        GamepadOptions& options = Storage::getInstance().getGamepadOptions();
+        if (options.inputMode != selectedMode) {
+            options.inputMode = selectedMode;
+            // RAM-only visual reboot cue. FightpadAmbientLEDAddon sends a
+            // final black frame during the existing 500ms save/reboot delay;
+            // the saved effect remains intact and returns after reset.
+            g_scrollWheelRebootBlackout = true;
+            EventManager::getInstance().triggerEvent(new GPStorageSaveEvent(true, true));
+        }
+        markMenuDirty();
+        return;
     }
 
     if (currentLevel == SWMenuLevel::INFO) {
@@ -477,13 +510,26 @@ void ScrollWheelMenuAddon::navSelect() {
             mainIndex = idx;
         else if (currentLevel == SWMenuLevel::RGB_SUB) {
             rgbSubIndex = idx;
-            if (idx == RGB_SUB_KEY_FLASH_INDEX)
-                g_menuRgbTarget = 2;  // Button RGB → flash color
         }
         g_menuState.level = static_cast<uint8_t>(target);
-        g_menuState.index = (target == SWMenuLevel::BRIGHTNESS)
-            ? g_menuBrightnessLevel
-            : 0;
+        if (target == SWMenuLevel::BRIGHTNESS) {
+            g_menuState.index = g_menuBrightnessLevel;
+        } else if (target == SWMenuLevel::LIGHT_EFFECT &&
+                   g_menuLightEffect < kMenuLightEffectsCount) {
+            g_menuState.index = g_menuLightEffect;
+        } else if (target == SWMenuLevel::CONTROLLER_TYPE) {
+            const uint8_t currentMode = static_cast<uint8_t>(
+                Storage::getInstance().getGamepadOptions().inputMode);
+            g_menuState.index = 0;
+            for (uint8_t i = 0; i < kMenuControllerTypesCount; i++) {
+                if (kMenuControllerTypes[i].targetIndex == currentMode) {
+                    g_menuState.index = i;
+                    break;
+                }
+            }
+        } else {
+            g_menuState.index = 0;
+        }
         g_menuState.scrollOffset = 0;
     }
     markMenuDirty();
@@ -526,14 +572,14 @@ void ScrollWheelMenuAddon::navBack() {
         markMenuDirty();
         break;
     case SWMenuLevel::BATTERY_INFO:
+    case SWMenuLevel::CONTROLLER_TYPE:
         g_menuState.level = static_cast<uint8_t>(SWMenuLevel::MAIN);
         g_menuState.index = mainIndex;
         g_menuState.scrollOffset = 0;
         markMenuDirty();
         break;
     case SWMenuLevel::COLOR:
-    case SWMenuLevel::BUTTON_EFFECT:
-    case SWMenuLevel::AMBIENT_EFFECT:
+    case SWMenuLevel::LIGHT_EFFECT:
     case SWMenuLevel::BRIGHTNESS:
         // Back to RGB_SUB without applying changes
         g_menuState.level = static_cast<uint8_t>(SWMenuLevel::RGB_SUB);
@@ -541,31 +587,17 @@ void ScrollWheelMenuAddon::navBack() {
         g_menuState.scrollOffset = 0;
         markMenuDirty();
         break;
-    case SWMenuLevel::COLOR_BTN:
-        // Back to BUTTON_EFFECT (Static Color = index 0)
-        g_menuState.level = static_cast<uint8_t>(SWMenuLevel::BUTTON_EFFECT);
+    case SWMenuLevel::COLOR_EFFECT:
+        // Back to LIGHT_EFFECT (Static Color = index 0)
+        g_menuState.level = static_cast<uint8_t>(SWMenuLevel::LIGHT_EFFECT);
         g_menuState.index = 0;
         g_menuState.scrollOffset = 0;
         markMenuDirty();
         break;
-    case SWMenuLevel::COLOR_AMB:
-        // Back to AMBIENT_EFFECT (Static Color = index 0)
-        g_menuState.level = static_cast<uint8_t>(SWMenuLevel::AMBIENT_EFFECT);
-        g_menuState.index = 0;
-        g_menuState.scrollOffset = 0;
-        markMenuDirty();
-        break;
-    case SWMenuLevel::COLOR_BTN_BREATH:
-        // Back to BUTTON_EFFECT (Breathing = index 2)
-        g_menuState.level = static_cast<uint8_t>(SWMenuLevel::BUTTON_EFFECT);
+    case SWMenuLevel::COLOR_EFFECT_BREATH:
+        // Back to LIGHT_EFFECT (Breathing = index 2)
+        g_menuState.level = static_cast<uint8_t>(SWMenuLevel::LIGHT_EFFECT);
         g_menuState.index = 2;
-        g_menuState.scrollOffset = 0;
-        markMenuDirty();
-        break;
-    case SWMenuLevel::COLOR_AMB_BREATH:
-        // Back to AMBIENT_EFFECT (Breathing = index 3)
-        g_menuState.level = static_cast<uint8_t>(SWMenuLevel::AMBIENT_EFFECT);
-        g_menuState.index = 3;
         g_menuState.scrollOffset = 0;
         markMenuDirty();
         break;
@@ -709,6 +741,17 @@ void ScrollWheelMenuAddon::updateGameplayInputLock(uint32_t now) {
 
 void ScrollWheelMenuAddon::process() {
     uint32_t now = getMillis();
+
+    // Keep OLED activity ownership on Core0. Use the already-debounced
+    // gameplay GPIO state so every physical GP2..GP20 key, including controls
+    // such as Turbo that may not appear in the final HID button report, wakes
+    // the display without consuming or rewriting the input.
+    Gamepad* gamepad = Storage::getInstance().GetGamepad();
+    if (gamepad != nullptr &&
+        (static_cast<uint32_t>(gamepad->debouncedGpio) &
+         SCROLLWHEEL_GAMEPLAY_GPIO_MASK) != 0) {
+        g_scrollWheelLastActivityMs.store(now, std::memory_order_release);
+    }
 
     // GP30: 5-state FSM with digital filter
     updateButton(now);

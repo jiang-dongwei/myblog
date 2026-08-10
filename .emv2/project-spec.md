@@ -117,6 +117,26 @@
 - 功能: 导航栏使用与 OLED 启动图一致的方框 R Logo 和 `FIGHTPAD` 粗斜体字标，并同步首页与浏览器品牌元数据
 - 讨论ID: `2026-07-31-webconfig-fightpad-branding`
 
+### Key/Base 统一灯效与 Chase 加速
+- 物理硬件: 无新增硬件，复用 GP22 的 12 颗 Key LED、GP40 的 19 颗 Base LED 和 GP24 RGB 电源门控
+- 功能: 将 Key Effect 与 Base Effect 合并为 Light Effect，两条灯链共享模式、颜色和动画相位，并将普通 Chase 从 200ms/格加快到 160ms/格
+- 讨论ID: `2026-08-07-unified-light-effect-chase-speed`
+
+### GP30 短按持久化开关普通灯效
+- 物理硬件: 复用 GP30 拨轮按键、GP22 Key 灯链、GP40 Base 灯链和 GP24 RGB 电源门控
+- 功能: 菜单关闭时短按 GP30 持久化关闭或恢复普通 Light Effect 与 Key Flash；菜单 All OFF 保持原覆盖行为，长按菜单不变，蓝牙 GP40 临时灯效保持现有行为
+- 讨论ID: `2026-08-07-gp30-short-press-light-toggle`
+
+### GP33传输选择与GP34 ESP32-C6使能
+- 物理硬件: GP33为USB/BT拨杆输入；GP34连接ESP32-C6 CHIP_PU/EN并高有效
+- 功能: 按装配实机挡位，GP33低选择USB并拉低GP34，GP33高选择BT并拉高GP34；运行时切换需稳定30ms，上电首次采样立即生效
+- 讨论ID: `2026-08-10-gp33-controls-esp32-enable`
+
+### GP22 Chase 2秒周期与任意按键唤醒OLED
+- 物理硬件: GP22的12颗按键灯、GP2～GP20游戏按键、GP30～GP32拨轮控制和I2C OLED
+- 功能: GP22与GP40普通Chase均为2秒一圈；OLED保持60秒空闲休眠，并可由GP2～GP20任意按键、GP30～GP32或蓝牙状态事件唤醒
+- 讨论ID: `2026-08-10-gp22-chase-oled-any-button-wake`
+
 ## 开发步骤状态
 
 | 步骤 | 描述 | 状态 | 讨论ID |
@@ -211,3 +231,37 @@
 | S27-B | 多语言首页品牌与浏览器元数据同步 | completed | 2026-07-31-webconfig-fightpad-branding |
 | S27-C | SVG、资源引用、响应式样式与补丁非编译静态检查 | completed | 2026-07-31-webconfig-fightpad-branding |
 | S27-D | 返工：移除导航破图节点并将 FIGHTPAD 文字左移 | in_progress | 2026-07-31-webconfig-fightpad-branding |
+| S29-A | 合并灯效菜单与旧配置双向映射 | completed | 2026-08-07-unified-light-effect-chase-speed |
+| S29-B | GP22/GP40 共享动画状态与普通 Chase 160ms/格 | completed | 2026-08-07-unified-light-effect-chase-speed |
+| S29-C | 菜单、映射、速度和优先级非编译静态验证 | completed | 2026-08-07-unified-light-effect-chase-speed |
+| S29-D | 构建烧录与五种效果实机回归 | pending | 2026-08-07-unified-light-effect-chase-speed |
+| S30-A | 当前 GP30 状态机发布菜单外短按灯光开关 | completed | 2026-08-07-gp30-short-press-light-toggle |
+| S30-B | 普通灯效运行时门控并保留蓝牙 GP40 临时覆盖 | completed | 2026-08-07-gp30-short-press-light-toggle |
+| S30-C | 短按、长按、蓝牙、All OFF 与低电优先级验证 | pending | 2026-08-07-gp30-short-press-light-toggle |
+| S31-A | Controller Type 菜单与八项上游 InputMode 映射 | completed | 2026-08-07-controller-type-menu-chase-100ms |
+| S31-B | 当前项标记、变更保存与 USB 重启重新枚举 | completed | 2026-08-07-controller-type-menu-chase-100ms |
+| S31-C | 菜单导航、模式映射、保存路径非编译静态验证 | completed | 2026-08-07-controller-type-menu-chase-100ms |
+| S31-D | 构建烧录与八种有线 USB 模式实机验证 | pending | 2026-08-07-controller-type-menu-chase-100ms |
+| S32-A | 普通 Light Effect Chase 由160ms调整为100ms，蓝牙50ms不变 | completed | 2026-08-07-controller-type-menu-chase-100ms |
+| S32-B | 普通双灯链同步与蓝牙状态 Chase 实机验证 | pending | 2026-08-07-controller-type-menu-chase-100ms |
+| S33-A | 菜单非OFF灯效选择同步恢复GP30手动灯光ON并持久化 | completed | 2026-08-07-menu-effect-enables-gp30-light |
+| S33-B | 非OFF状态写入、OFF隔离与保存顺序非编译静态验证 | completed | 2026-08-07-menu-effect-enables-gp30-light |
+| S33-C | GP30关闭后菜单恢复灯光与重启持久化实机验证 | pending | 2026-08-07-menu-effect-enables-gp30-light |
+| S34-A | 控制器模式变更后以RAM黑屏标志提供明显重启反馈 | completed | 2026-08-07-controller-mode-visible-reboot |
+| S34-B | 黑屏优先级、非持久化与watchdog路径非编译静态验证 | completed | 2026-08-07-controller-mode-visible-reboot |
+| S34-C | 500ms熄灯、USB重枚举与启动后灯效恢复实机验证 | pending | 2026-08-07-controller-mode-visible-reboot |
+| S35-A | 普通GP40和GP22 Chase改为两个三灯拖尾段 | completed | 2026-08-07-normal-dual-segment-chase |
+| S35-B | 半圈间隔、共享步进、速度隔离与Key Flash非编译静态验证 | completed | 2026-08-07-normal-dual-segment-chase |
+| S35-C | 双段追逐、两链同步和按键闪光实机验证 | pending | 2026-08-07-normal-dual-segment-chase |
+| S36-A | GP22一秒与GP40两秒独立整圈周期时间相位（历史实现，S38-A已替代） | completed | 2026-08-07-independent-chase-cycle-speed |
+| S36-B | 周期公式、双段几何、共享颜色和蓝牙速度隔离静态验证 | completed | 2026-08-07-independent-chase-cycle-speed |
+| S36-C | 历史1秒/2秒周期实机验证（由S38-D替代） | superseded | 2026-08-07-independent-chase-cycle-speed |
+| S37-A | GP33/GP34板级配置与C6 EN跟随驱动 | completed | 2026-08-10-gp33-controls-esp32-enable |
+| S37-B | 实机返工为USB低有效/BT高有效并保持Proxy路径一致 | completed | 2026-08-10-gp33-controls-esp32-enable |
+| S37-C | 真值表、单一写入者、GP35与resetPin隔离静态验证 | completed | 2026-08-10-gp33-controls-esp32-enable |
+| S37-D | GP33/GP34电平、C6广播与USB/BT实机验证 | pending | 2026-08-10-gp33-controls-esp32-enable |
+| S37-E | GP33 30ms非阻塞消抖与双执行路径一致性 | completed | 2026-08-10-gp33-controls-esp32-enable |
+| S38-A | GP22普通Chase由1秒调整为2秒一圈 | completed | 2026-08-10-gp22-chase-oled-any-button-wake |
+| S38-B | GP2～GP20任意已消抖按键刷新OLED活动时间并唤醒 | completed | 2026-08-10-gp22-chase-oled-any-button-wake |
+| S38-C | Chase周期、60秒休眠和跨核唤醒路径非编译静态验证 | completed | 2026-08-10-gp22-chase-oled-any-button-wake |
+| S38-D | 构建烧录、双链周期与全部按键唤醒实机验证 | pending | 2026-08-10-gp22-chase-oled-any-button-wake |

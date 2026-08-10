@@ -1,0 +1,18 @@
+{
+  "discussion_id": "2026-08-07-gp30-short-press-light-toggle",
+  "created_at": "2026-08-07",
+  "current_phase": 5,
+  "phases": {
+    "split": "completed",
+    "requirements": "completed",
+    "hardware": "completed",
+    "brainstorm": "completed",
+    "milestones": "completed"
+  },
+  "subsystems": [
+    "GP30 short-press arbitration",
+    "unified light runtime toggle",
+    "state restoration and priority"
+  ],
+  "current_subsystem": 0
+}

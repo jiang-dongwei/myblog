@@ -1,0 +1,17 @@
+{
+  "discussion_id": "2026-08-07-menu-effect-enables-gp30-light",
+  "created_at": "2026-08-07",
+  "current_phase": 5,
+  "phases": {
+    "split": "completed",
+    "requirements": "completed",
+    "hardware": "completed",
+    "brainstorm": "completed",
+    "milestones": "completed"
+  },
+  "subsystems": [
+    "scrollwheel light selection",
+    "GP30 manual light persistence"
+  ],
+  "current_subsystem": 0
+}

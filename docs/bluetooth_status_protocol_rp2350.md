@@ -26,7 +26,7 @@ Status values:
 | `0x00` | `Disconnected` for 1000ms | Black for 1000ms |
 | `0x01` | `Connecting...` until the next status | Blue Chase |
 | `0x02` | `Connected` for 1000ms | Solid blue for 1000ms |
-| `0x03` | `Pairing...` until the next status | Blue Chase |
+| `0x03` | Centered `Pairing...` status page until the next status | Blue Chase |
 
 Frames with a bad XOR or a status value outside `0x00..0x03` are ignored.
 The status frame shares the existing UART byte stream with `0x46 0x49`
@@ -49,7 +49,8 @@ status arrives. A terminal `Disconnected` or `Connected` result expires after
 the notification.
 
 Fightpad12Slim currently enables
-`FIGHTPAD12SLIM_ESP32_BT_STATUS_DUAL_CHASE=1`. Pairing and Connecting therefore
+`FIGHTPAD12SLIM_ESP32_BT_STATUS_DUAL_CHASE=1`. Pairing and Connecting use the
+same centered OLED status-page layout and therefore
 render two pure-blue three-pixel trails on the 19-pixel GP40 Base chain. Each
 trail uses `80%/25%/5%` head-to-tail brightness, advances one pixel every 50ms,
 and the second head stays nine logical pixels from the first. Setting the macro

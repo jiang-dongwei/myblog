@@ -1,0 +1,14 @@
+{
+  "discussion_id": "2026-08-10-gp33-controls-esp32-enable",
+  "created_at": "2026-08-10",
+  "current_phase": 5,
+  "phases": {
+    "split": "completed",
+    "requirements": "completed",
+    "hardware": "completed",
+    "brainstorm": "completed",
+    "milestones": "completed"
+  },
+  "subsystems": ["transport selector", "ESP32-C6 enable output", "proxy mode consistency"],
+  "current_subsystem": 0
+}

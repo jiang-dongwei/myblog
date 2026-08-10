@@ -200,6 +200,20 @@ void FightpadESP32ProxyAddon::setup()
         gpio_pull_up(FIGHTPAD12SLIM_TRANSPORT_SEL_PIN);
     }
 
+#if FIGHTPAD12SLIM_ESP32_PROXY_ENABLE_FOLLOWS_TRANSPORT
+    if (isValidPin(FIGHTPAD12SLIM_ESP32_PROXY_ENABLE_PIN)) {
+        const bool esp32Enabled = isBluetoothTransportSelected();
+        const bool outputLevel = esp32Enabled
+            ? (FIGHTPAD12SLIM_ESP32_PROXY_ENABLE_ACTIVE_LEVEL != 0)
+            : (FIGHTPAD12SLIM_ESP32_PROXY_ENABLE_ACTIVE_LEVEL == 0);
+        gpio_init(FIGHTPAD12SLIM_ESP32_PROXY_ENABLE_PIN);
+        gpio_put(FIGHTPAD12SLIM_ESP32_PROXY_ENABLE_PIN, outputLevel);
+        gpio_set_dir(FIGHTPAD12SLIM_ESP32_PROXY_ENABLE_PIN, GPIO_OUT);
+        lastESP32Enabled = esp32Enabled;
+        lastESP32EnabledValid = true;
+    }
+#endif
+
     if (isValidPin(bootPin)) {
         gpio_init(bootPin);
         gpio_set_dir(bootPin, GPIO_IN);
@@ -258,6 +272,8 @@ void FightpadESP32ProxyAddon::process()
         return;
     }
 
+    updateESP32EnableFromTransport();
+
     checkIncomingFrameTimeout();
 
 #if FIGHTPAD12SLIM_ESP32_PROXY_CDC_DESC_ENABLED
@@ -290,6 +306,8 @@ void FightpadESP32ProxyAddon::reinit()
     resetFirmwareInfoSequence();
     lastInputReportValid = false;
     lastTransportModeValid = false;
+    lastESP32EnabledValid = false;
+    updateESP32EnableFromTransport(true);
     lastBatteryPercentValid = false;
 }
 
@@ -748,13 +766,56 @@ void FightpadESP32ProxyAddon::refreshTurboPinMask()
     }
 }
 
-bool FightpadESP32ProxyAddon::isBluetoothTransportSelected() const
+bool FightpadESP32ProxyAddon::isBluetoothTransportSelected()
 {
     if (!isValidPin(FIGHTPAD12SLIM_TRANSPORT_SEL_PIN)) {
         return true;
     }
 
-    return gpio_get(FIGHTPAD12SLIM_TRANSPORT_SEL_PIN) == FIGHTPAD12SLIM_TRANSPORT_BT_LEVEL;
+    const bool rawBluetoothSelected =
+        gpio_get(FIGHTPAD12SLIM_TRANSPORT_SEL_PIN) == FIGHTPAD12SLIM_TRANSPORT_BT_LEVEL;
+    const uint32_t now = getMillis();
+
+    if (!transportDebounceValid) {
+        transportDebounceCandidate = rawBluetoothSelected;
+        transportDebounceStable = rawBluetoothSelected;
+        transportDebounceCandidateSinceMs = now;
+        transportDebounceValid = true;
+        return transportDebounceStable;
+    }
+
+    if (rawBluetoothSelected != transportDebounceCandidate) {
+        transportDebounceCandidate = rawBluetoothSelected;
+        transportDebounceCandidateSinceMs = now;
+    } else if (transportDebounceStable != transportDebounceCandidate &&
+               (now - transportDebounceCandidateSinceMs) >= FIGHTPAD12SLIM_TRANSPORT_DEBOUNCE_MS) {
+        transportDebounceStable = transportDebounceCandidate;
+    }
+
+    return transportDebounceStable;
+}
+
+void FightpadESP32ProxyAddon::updateESP32EnableFromTransport(bool force)
+{
+#if FIGHTPAD12SLIM_ESP32_PROXY_ENABLE_FOLLOWS_TRANSPORT
+    if (!isValidPin(FIGHTPAD12SLIM_ESP32_PROXY_ENABLE_PIN)) {
+        return;
+    }
+
+    const bool esp32Enabled = isBluetoothTransportSelected();
+    if (!force && lastESP32EnabledValid && lastESP32Enabled == esp32Enabled) {
+        return;
+    }
+
+    const bool outputLevel = esp32Enabled
+        ? (FIGHTPAD12SLIM_ESP32_PROXY_ENABLE_ACTIVE_LEVEL != 0)
+        : (FIGHTPAD12SLIM_ESP32_PROXY_ENABLE_ACTIVE_LEVEL == 0);
+    gpio_put(FIGHTPAD12SLIM_ESP32_PROXY_ENABLE_PIN, outputLevel);
+    lastESP32Enabled = esp32Enabled;
+    lastESP32EnabledValid = true;
+#else
+    (void)force;
+#endif
 }
 
 void FightpadESP32ProxyAddon::sendTransportModeFrame(bool bluetoothSelected, bool force)

@@ -62,6 +62,15 @@ static absolute_time_t rebootDelayTimeout = nil_time;
 #define FIGHTPAD12SLIM_TRANSPORT_BT_LEVEL 0
 #endif
 
+#ifndef FIGHTPAD12SLIM_TRANSPORT_DEBOUNCE_MS
+#define FIGHTPAD12SLIM_TRANSPORT_DEBOUNCE_MS 30
+#endif
+
+static bool fightpadTransportDebounceCandidate = false;
+static bool fightpadTransportDebounceStable = false;
+static bool fightpadTransportDebounceValid = false;
+static uint32_t fightpadTransportDebounceCandidateSinceMs = 0;
+
 static bool fightpadTransportSwitchAvailable() {
 	return isValidPin(FIGHTPAD12SLIM_TRANSPORT_SEL_PIN);
 }
@@ -77,8 +86,31 @@ static void initFightpadTransportSwitch() {
 }
 
 static bool fightpadBluetoothTransportSelected() {
-	return fightpadTransportSwitchAvailable() &&
+	if (!fightpadTransportSwitchAvailable()) {
+		return false;
+	}
+
+	const bool rawBluetoothSelected =
 		gpio_get(FIGHTPAD12SLIM_TRANSPORT_SEL_PIN) == FIGHTPAD12SLIM_TRANSPORT_BT_LEVEL;
+	const uint32_t now = to_ms_since_boot(get_absolute_time());
+
+	if (!fightpadTransportDebounceValid) {
+		fightpadTransportDebounceCandidate = rawBluetoothSelected;
+		fightpadTransportDebounceStable = rawBluetoothSelected;
+		fightpadTransportDebounceCandidateSinceMs = now;
+		fightpadTransportDebounceValid = true;
+		return fightpadTransportDebounceStable;
+	}
+
+	if (rawBluetoothSelected != fightpadTransportDebounceCandidate) {
+		fightpadTransportDebounceCandidate = rawBluetoothSelected;
+		fightpadTransportDebounceCandidateSinceMs = now;
+	} else if (fightpadTransportDebounceStable != fightpadTransportDebounceCandidate &&
+		(now - fightpadTransportDebounceCandidateSinceMs) >= FIGHTPAD12SLIM_TRANSPORT_DEBOUNCE_MS) {
+		fightpadTransportDebounceStable = fightpadTransportDebounceCandidate;
+	}
+
+	return fightpadTransportDebounceStable;
 }
 
 static bool processFightpadUsbTransportReport(

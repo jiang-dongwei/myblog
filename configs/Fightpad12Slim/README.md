@@ -70,8 +70,8 @@ Enter RP2350 BOOTSEL mode using the board recovery path/test pad, then copy the 
 | GP30 | Ambient LED on/off | `ASSIGNED_TO_ADDON` + diagnostic input | Upper-left OLED dot; active-low |
 | GP31 | Ambient effect previous | `ASSIGNED_TO_ADDON` + diagnostic input | Upper-left OLED dot; active-low |
 | GP32 | Ambient effect next | `ASSIGNED_TO_ADDON` + diagnostic input | Upper-left OLED dot; active-low |
-| GP33 | HID transport switch | `ASSIGNED_TO_ADDON` + `FIGHTPAD12SLIM_TRANSPORT_SEL_PIN = 33` | High = USB-HID, low = BT-HID, independent of power source |
-| GP34 | ESP32-C6 EN / RESET | `ASSIGNED_TO_ADDON` | Reserved; released by runtime firmware so the reset button can pull it low |
+| GP33 | HID transport switch | `ASSIGNED_TO_ADDON` + `FIGHTPAD12SLIM_TRANSPORT_SEL_PIN = 33` | Low = USB-HID, high = BT-HID; runtime changes require 30 ms stable input |
+| GP34 | ESP32-C6 EN / RESET | `ASSIGNED_TO_ADDON` | Low in USB mode; high in BT mode to enable the ESP32-C6 |
 | GP35 | ESP32-C6 boot strap | `ASSIGNED_TO_ADDON` | Reserved; released by runtime firmware so the boot button can pull it low |
 | GP36 | UART1 TX to ESP32-C6 RXD | `ASSIGNED_TO_ADDON` | Follow-up BT HCI |
 | GP37 | UART1 RX from ESP32-C6 TXD | `ASSIGNED_TO_ADDON` | Follow-up BT HCI |
@@ -100,9 +100,9 @@ The Fightpad-specific ambient LED addon owns both WS2812 outputs: the 19-LED GP4
 - `FT`: runtime BT transport enable state from GP33.
 - `FB`: battery status from RP2350, carrying percent, VBUS-present state, raw ADC sample, and checksum. Percent comes from the same BQ27220 SOC snapshot shown on the OLED; GP21 and GP41 remain supplemental power/ADC diagnostics. The ESP32-C6 uses the percent field for its BLE HID battery level characteristic.
 
-GP33 is the runtime transport switch. High selects USB-HID and stops the ESP input feed after sending one neutral frame. Low selects BT-HID and keeps the USB HID endpoint enumerated but neutral so a connected USB host cannot retain a stale pressed-button report.
+GP33 is the runtime transport switch. Low selects USB-HID and stops the ESP input feed after sending one neutral frame. High selects BT-HID and keeps the USB HID endpoint enumerated but neutral so a connected USB host cannot retain a stale pressed-button report. This polarity follows the assembled switch's observed physical positions. The boot state is accepted immediately; later switch changes must remain stable for 30 ms before the USB report path, ESP input feed, and GP34 enable output change modes.
 
-The runtime build does not drive GP34 or GP35. Those nets are left for the physical ESP32-C6 RESET and BOOT buttons.
+The runtime build drives GP34 as the ESP32-C6 enable signal and leaves GP35 for the physical ESP32-C6 BOOT button. The configurable proxy reset/boot pins remain disabled, so CDC DTR/RTS handling does not take ownership of either net.
 
 ## BQ27220 Battery Snapshot UART
 
@@ -116,7 +116,7 @@ The first line follows the configured BQ27220 boot delay, then output uses `FIGH
 
 The BUTTONS page keeps the normal button viewer and shows the BQ27220 numeric SOC immediately to the left of the four-cell battery icon in the upper-right corner. It does not overlay voltage, current, or FCC diagnostics. The four Battery Info debug pages remain compiled, but their level-0 entry is hidden by `SCROLLWHEEL_BATTERY_INFO_MENU_ENABLED=0`; set it to `1` to restore the entry for gauge debugging.
 
-Core0 records every raw edge on GP30, GP31, or GP32. When no edge has been seen for 60 seconds, the Core1 display addon powers off the SSD1306 and skips further frame rendering. The first new edge powers the OLED back on immediately and is still processed normally by the scrollwheel/menu input logic. GP19 BACK does not reset this dedicated inactivity timer.
+Core0 records activity from every debounced GP2-GP20 gameplay key and every raw edge on GP30, GP31, or GP32. When no such activity has been seen for 60 seconds, the Core1 display addon powers off the SSD1306 and skips further frame rendering. Pressing any gameplay key or operating GP30/GP31/GP32 powers the OLED back on immediately without consuming the input; Bluetooth status transitions retain their existing wake behavior.
 
 ## BQ27220 Low-Battery LED Cutoff
 

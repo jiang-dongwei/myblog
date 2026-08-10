@@ -673,3 +673,123 @@ Base Effect 和 Key Effect 都需要同时提供两个呼吸灯入口：
 ### 讨论ID
 
 `2026-07-31-webconfig-fightpad-branding`
+
+## 2026-08-07: Key/Base 统一灯效与 Chase 加速规划 (S29)
+
+### 需求与决策
+
+- `RGB Customize` 将 `Key Effect` 与 `Base Effect` 合并为单一 `Light Effect`，统一提供 Static Color、Gradient、Breathing、Rainbow、Chase。
+- GP22 Key 与 GP40 Base 共享一个运行时效果编号；Static/Breathing 同时写入两条链的颜色，动态效果每帧只推进一次共享相位。
+- 普通 Chase 从 `200 ms/格` 改为 `160 ms/格`；蓝牙状态 Pairing/Connecting 的 `50 ms/格` Chase 不变。
+- 保留 protobuf 的 `buttonEffectIndex` 与 `ambientEffectIndex` 字段和编号；启动时转换为统一效果，保存时映射回两个旧编号。
+- 旧 Key/Base 配置不一致时优先采用 Key，Key 无有效值时采用 Base；旧颜色同样优先 Key。
+- Key Flash、All OFF、GP24 门控、蓝牙 GP40 临时覆盖和 `SOC <= 7%` 低电最终关灯优先级不变。
+- 按仓库约定不运行编译，由用户完成构建、烧录与实机验证。
+
+### 讨论ID
+
+`2026-08-07-unified-light-effect-chase-speed`
+
+### 实现记录
+
+- `RGB Customize` 已变为 Key Flash、Light Effect、Brightness、All OFF，All OFF 的命名索引同步从 4 调整为 3。
+- 新增统一 `SWLightEffect` 与 `g_menuLightEffect`，并将两条运行时颜色状态合并为 `g_menuRgbEffectColor`。
+- 启动时按 Key 优先规则读取旧效果/颜色；保存时将统一效果分别映射回合法的 `buttonEffectIndex` 与 `ambientEffectIndex`，protobuf 未修改。
+- `FightpadAmbientLEDAddon` 在渲染入口单次更新共享 Gradient/Rainbow/Chase 相位，两条灯链不再各自推进动画。
+- Static、Gradient、Breathing、Rainbow、Chase 均同步；Chase 共用动态色轮颜色，GP40 保留 5 灯对称梯度，GP22 保留 3 灯拖尾与 Key Flash 覆盖。
+- 普通 Chase 使用 `FIGHTPAD12SLIM_LIGHT_CHASE_STEP_MS=160`；蓝牙状态分支仍为 `elapsedMs / 50U`。
+- 旧分离状态残留搜索、菜单/映射/速度/优先级定向断言和 `git diff --check` 通过；按仓库约定未运行编译。
+- S29-D 等待用户构建、烧录并验证五种效果、重启恢复、All OFF、蓝牙覆盖和低电保护。
+
+## 2026-08-07: GP30 短按持久化开关普通灯效规划 (S30)
+
+- 使用当前 ScrollWheelMenuAddon 五态状态机作为 GP30 短按/长按的唯一判定者，不恢复旧版 FightpadAmbientLEDAddon 独立读取 GP30 的实现。
+- 菜单关闭时短按切换独立状态，只禁止普通 Light Effect 和 Key Flash，不修改菜单效果、颜色或亮度，并通过现有存储事件写入 Flash。
+- 长按 2 秒进入/退出菜单以及菜单内短按确认保持不变。
+- 手动关闭期间蓝牙 Pairing/Connecting/Connected 的现有 GP40 临时灯效和 GP24 临时供电保持不变；提示结束后重新熄灭。
+- BQ27220 `SOC <= 7%` 低电保护继续保持最高优先级。
+- 讨论ID: `2026-08-07-gp30-short-press-light-toggle`
+
+### 实现记录
+
+- 新增 `FightpadAmbientLEDOptions.manualLightEffectsEnabled` 字段和运行时 `g_manualLightEffectsEnabled`；旧配置缺少字段时默认开启。
+- `navSelect()` 在菜单关闭时翻转该状态并触发现有 `GPStorageSaveEvent`；菜单打开时仍执行原有选择，`btnFromLong` 继续阻止长按释放调用 `navSelect()`。
+- `FightpadAmbientLEDAddon` 的普通 `enabled` 改为菜单电源请求与手动状态相与；蓝牙 `bluetoothStatusLightRequired` 仍通过原有独立分支请求 GP40 和 GP24。
+- 手动关闭时普通 GP22/GP40 与 Key Flash 熄灭；蓝牙提示可临时点亮 GP40，提示结束后重新熄灭。
+- 菜单 `All OFF` 保持原来的颜色/效果覆盖式持久化行为，不改为新开关字段。
+- 定向检查确认短按只在 `!btnFromLong` 时调用、菜单内仍执行原选择逻辑、蓝牙与低电最终输出表达式未被改写；`git diff --check` 通过。
+- 按仓库约定未运行编译；S30-C 等待用户构建、烧录并实测短按恢复、长按菜单及蓝牙提示覆盖。
+- 按用户最终决策，GP30 开关改为独立 protobuf 字段持久化；菜单 `All OFF` 继续使用原覆盖颜色和效果的实现。
+- `ConfigUtils` 对旧配置将新字段默认初始化为 `true`；启动读取、短按翻转、`persistConfig()` 写回和存储事件调用链检查通过。
+- 手动关闭使普通 `enabled` 为 false，因此蓝牙覆盖期间 `renderButtons()` 不执行，GP22 与 Key Flash 保持黑色；GP40 蓝牙状态和低电最终关灯表达式保持原样。
+- 持久化修改后的 `git diff --check` 通过；仍未运行编译。
+
+## 2026-08-07: 拨轮 Controller Type 上游模式接入 (S31)
+
+- 在实体拨轮主菜单的 `RGB Customize` 后增加 `Controller Type`，不是新增 Web Config 页面。
+- 模式固定为 XBOX、PS3、PS4、PS5、SWITCH、SWITCH PRO、KEYBOARD、GENERIC HID，并直接映射上游 `InputMode` 枚举。
+- 不增加独立 Arcade；Arcade Stick 属于上游 `InputModeDeviceType`。Generic HID 保留上游名称，不包装成自定义 DInput 协议。
+- 进入列表自动定位已保存模式，OLED 右侧 `*` 标记当前项，GP19 返回主菜单并恢复入口位置。
+- 选择相同模式不写入、不重启；选择不同模式更新 `GamepadOptions.inputMode` 并触发 `GPStorageSaveEvent(true, true)`，保存后由 RP2350 重启完成 USB 重新枚举。
+- 定向检查覆盖八项映射、菜单表/计数/显示/返回路径和保存重启调用；`git diff --check` 通过。
+- 按仓库约定未运行编译；S31-D 等待用户构建、烧录和实机验证。
+
+## 2026-08-07: 普通 Chase 加速至 100ms (S32)
+
+- 将 `FIGHTPAD12SLIM_LIGHT_CHASE_STEP_MS` 的板级默认值由 160ms/格调整为 100ms/格。
+- 普通 GP22 Key 与 GP40 Base 仍由同一共享 Chase 状态推进，未拆分动画相位。
+- 蓝牙 Pairing/Connecting 的两个状态 Chase 分支继续使用 `elapsedMs / 50U`，速度和临时覆盖优先级不变。
+- 定向搜索和 `git diff --check` 通过；按仓库约定未运行编译，等待用户烧录实测。
+
+## 2026-08-07: 菜单非 OFF 灯效恢复 GP30 手动灯光 ON (S33)
+
+- Key Flash 选择非 OFF 颜色、Static/Breathing 选择非 OFF 颜色，以及 Gradient/Rainbow/Chase 选择后，都会在保存前同步设置 `g_manualLightEffectsEnabled=true`。
+- 颜色 `OFF`、菜单 `All OFF`、蓝牙临时覆盖和低电保护逻辑未改。
+- 复用现有 `persistConfig()` 将效果、颜色和 GP30 手动状态一起写入 Flash，不新增 protobuf 字段。
+- 控制器模式切换仍经过强制保存、500ms 延时和 RP2350 watchdog 硬件重启；LED 在供电未断时锁存最后一帧，因此视觉连续不代表软件假重启。
+- 非 OFF 三条选择路径、OFF 隔离、保存顺序和 `git diff --check` 已通过；按仓库约定未运行编译，等待用户烧录验证。
+
+## 2026-08-07: Controller Type 可见重启黑屏 (S34)
+
+- 控制器模式实际变化时，在 `GPStorageSaveEvent(true, true)` 前置位 RAM-only `g_scrollWheelRebootBlackout`。
+- FightpadAmbientLEDAddon 在普通 enabled、render 和最终 show 三层检查黑屏状态，确保 GP22/GP40 写入全黑且蓝牙临时灯效不能覆盖。
+- 黑屏标志不进入 protobuf；watchdog 重启后自动恢复为 false，原 Flash 灯效重新加载。
+- 相同模式不置位黑屏、不保存、不重启；现有 500ms 延时、watchdog 重启和 USB 重新枚举路径不变。
+- 未改变当前 GP24 OFF 门控板级选项，避免扩大到其他灯光场景。
+- 按仓库约定未运行编译，等待用户烧录观察约 500ms 熄灯提示和启动恢复。
+
+## 2026-08-07: 普通 Light Effect 双段 Chase (S35)
+
+- 普通 GP40 19 灯和 GP22 12 灯 Chase 均改为两个三灯拖尾段，第二段头灯为 `(head + count / 2) % count`。
+- 两段亮度复用蓝牙双段 Chase 的 `0.80/0.25/0.05`，方向同为从头灯向后衰减。
+- GP40 两段相隔9格，GP22相隔6格；两链继续共享 `lightChaseStep` 和动态色轮颜色。
+- GP22 按键闪光覆盖保留；普通 Chase 仍为100ms/格，蓝牙状态 Chase 仍为50ms/格。
+- 两链双段数量、半圈间隔、拖尾亮度、Key Flash、速度隔离、GP22最终写入所有权和 `git diff --check` 均通过。
+- 按仓库约定未运行编译，等待用户烧录验证双段效果。
+
+## 2026-08-07: GP22 1秒/圈与GP40 2秒/圈 (S36)
+
+- 普通双段 Chase 不再让两条不同长度灯链共享同一个灯位步进。
+- 新增 GP22=1000ms/圈、GP40=2000ms/圈板级常量，以 `(elapsed % cycleMs) * count / cycleMs` 按绝对经过时间计算头灯。
+- GP22平均约83.3ms跨一灯，GP40平均约105.3ms跨一灯；20ms渲染调度不会累计拖慢整圈周期。
+- 两链继续共享动态色轮颜色，并保留双段三灯拖尾、Key Flash和蓝牙50ms状态灯。
+- 周期边界、旧共享步进清理、双段连接、蓝牙速度隔离和 `git diff --check` 均通过。
+- 按仓库约定未运行编译，等待用户烧录计时验证。
+
+## 2026-08-10: GP33传输选择、GP34 C6使能与消抖 (S37)
+
+- 原理图只能确认GP33可切到3.3V或GND，不能仅凭图中文字确定装配后拨杆方向；首轮实机表现证明原推断相反，固件最终按低=USB、高=BT处理。
+- GP34作为独立板级高有效EN输出：USB模式拉低，BT模式拉高；不复用WebConfig/DTR-RTS resetPin，GP35保持不驱动。
+- GP34连接ESP32-C6 CHIP_PU/EN，因此低电平表示硬件关断/复位保持，不是ESP32软件light/deep sleep。
+- 上电首次采样立即生效；运行中GP33候选电平必须连续稳定30ms才提交，使用无阻塞、无符号时间差实现。
+- Core0 USB报告门控与ESP32 Proxy各自维护同参数消抖状态，避免跨核心共享可变状态；Proxy内部的UART输入帧、模式帧和GP34使用同一稳定状态。
+- 同步修正文档中“GP34不驱动”的过期说明；按仓库约定不运行编译，等待用户构建烧录和实机验证。
+
+## 2026-08-10: GP22 Chase 2秒周期与任意按键唤醒OLED (S38)
+
+- 当前Fightpad板级OLED专用空闲休眠阈值为60000ms；该分支此前只消费GP30/31/32原子活动时间和蓝牙状态事件，且会在通用Display Saver按键逻辑之前提前关屏返回。
+- GP22普通Chase周期从1000ms改为2000ms；GP40保持2000ms，普通颜色节拍保持100ms，蓝牙Pairing/Connecting的GP40 Chase保持50ms/颗。
+- ScrollWheelMenuAddon在Core0读取现有已消抖GP2～GP20掩码；任意按键按下期间持续更新已有原子活动时间戳。
+- Core1 DisplayAddon无需新增GPIO读取或跨核共享字段，继续从同一时间戳完成60秒休眠和立即唤醒。
+- 唤醒路径不修改或吞掉游戏输入，不写Flash；GP30/31/32及蓝牙状态唤醒保持原样。
+- 定向静态验证和`git diff --check`通过；按仓库约定未运行编译，等待用户构建烧录和实机复测。

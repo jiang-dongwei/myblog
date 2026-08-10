@@ -629,17 +629,15 @@ void DisplayAddon::drawScrollWheelMenu() {
         case SWMenuLevel::RGB_SUB:
             table = kMenuRgbSub; count = kMenuRgbSubCount; break;
         case SWMenuLevel::COLOR:
-        case SWMenuLevel::COLOR_BTN:
-        case SWMenuLevel::COLOR_AMB:
-        case SWMenuLevel::COLOR_BTN_BREATH:
-        case SWMenuLevel::COLOR_AMB_BREATH:
+        case SWMenuLevel::COLOR_EFFECT:
+        case SWMenuLevel::COLOR_EFFECT_BREATH:
             table = kMenuColors; count = kMenuColorsCount; break;
-        case SWMenuLevel::BUTTON_EFFECT:
-            table = kMenuButtonEffects; count = kMenuButtonEffectsCount; break;
-        case SWMenuLevel::AMBIENT_EFFECT:
-            table = kMenuAmbientEffects; count = kMenuAmbientEffectsCount; break;
+        case SWMenuLevel::LIGHT_EFFECT:
+            table = kMenuLightEffects; count = kMenuLightEffectsCount; break;
         case SWMenuLevel::BRIGHTNESS:
             table = kMenuBrightness; count = kMenuBrightnessCount; break;
+        case SWMenuLevel::CONTROLLER_TYPE:
+            table = kMenuControllerTypes; count = kMenuControllerTypesCount; break;
         case SWMenuLevel::BATTERY_INFO:
             break;
         default: break;
@@ -662,14 +660,14 @@ void DisplayAddon::drawScrollWheelMenu() {
     // 0xFF = nothing active / never set.
     uint8_t activeVal = 0xFF;
     switch (level) {
-        case SWMenuLevel::COLOR:       activeVal = g_menuRgbButton;    break;
-        case SWMenuLevel::COLOR_BTN:   activeVal = g_menuRgbTop;       break;
-        case SWMenuLevel::COLOR_AMB:   activeVal = g_menuRgbBottom;    break;
-        case SWMenuLevel::COLOR_BTN_BREATH: activeVal = g_menuRgbTop;    break;
-        case SWMenuLevel::COLOR_AMB_BREATH: activeVal = g_menuRgbBottom; break;
-        case SWMenuLevel::BUTTON_EFFECT:  activeVal = g_menuButtonEffect;  break;
-        case SWMenuLevel::AMBIENT_EFFECT: activeVal = g_menuAmbientEffect; break;
-        case SWMenuLevel::BRIGHTNESS:     activeVal = g_menuBrightnessLevel; break;
+        case SWMenuLevel::COLOR:               activeVal = g_menuRgbButton;       break;
+        case SWMenuLevel::COLOR_EFFECT:
+        case SWMenuLevel::COLOR_EFFECT_BREATH: activeVal = g_menuRgbEffectColor;  break;
+        case SWMenuLevel::LIGHT_EFFECT:        activeVal = g_menuLightEffect;     break;
+        case SWMenuLevel::BRIGHTNESS:          activeVal = g_menuBrightnessLevel; break;
+        case SWMenuLevel::CONTROLLER_TYPE:
+            activeVal = static_cast<uint8_t>(Storage::getInstance().getGamepadOptions().inputMode);
+            break;
         default: break;
     }
 

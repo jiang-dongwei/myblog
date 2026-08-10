@@ -115,6 +115,22 @@
 #define FIGHTPAD12SLIM_TRANSPORT_BT_LEVEL 0
 #endif
 
+#ifndef FIGHTPAD12SLIM_TRANSPORT_DEBOUNCE_MS
+#define FIGHTPAD12SLIM_TRANSPORT_DEBOUNCE_MS 30
+#endif
+
+#ifndef FIGHTPAD12SLIM_ESP32_PROXY_ENABLE_PIN
+#define FIGHTPAD12SLIM_ESP32_PROXY_ENABLE_PIN -1
+#endif
+
+#ifndef FIGHTPAD12SLIM_ESP32_PROXY_ENABLE_ACTIVE_LEVEL
+#define FIGHTPAD12SLIM_ESP32_PROXY_ENABLE_ACTIVE_LEVEL 1
+#endif
+
+#ifndef FIGHTPAD12SLIM_ESP32_PROXY_ENABLE_FOLLOWS_TRANSPORT
+#define FIGHTPAD12SLIM_ESP32_PROXY_ENABLE_FOLLOWS_TRANSPORT 0
+#endif
+
 #ifndef FIGHTPAD12SLIM_VBAT_SENSE_PIN
 #define FIGHTPAD12SLIM_VBAT_SENSE_PIN -1
 #endif
@@ -215,7 +231,8 @@ private:
     bool appendFirmwareInfoPayload(const uint8_t payload[4]);
     bool parseFirmwareInfoPayload();
     void refreshTurboPinMask();
-    bool isBluetoothTransportSelected() const;
+    bool isBluetoothTransportSelected();
+    void updateESP32EnableFromTransport(bool force = false);
     void sendTransportModeFrame(bool bluetoothSelected, bool force = false);
     void sendBatteryStatusFrame(bool force = false);
     void sendInputReportFrame();
@@ -258,6 +275,12 @@ private:
     uint32_t lastTransportModeTimeMs = 0;
     bool lastTransportMode = false;
     bool lastTransportModeValid = false;
+    bool transportDebounceCandidate = false;
+    bool transportDebounceStable = false;
+    bool transportDebounceValid = false;
+    uint32_t transportDebounceCandidateSinceMs = 0;
+    bool lastESP32Enabled = false;
+    bool lastESP32EnabledValid = false;
     uint32_t lastBatteryStatusTimeMs = 0;
     uint8_t lastBatteryPercent = 0;
     bool lastBatteryPercentValid = false;
