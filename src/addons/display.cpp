@@ -244,15 +244,20 @@ void DisplayAddon::process() {
 
     const bool bluetoothOverlayActive = hasBluetoothEvent &&
         isFightpadESP32BluetoothStatusEventActive(bluetoothEvent, now);
+    const bool splashScreenActive = !configMode &&
+        currDisplayMode == DisplayMode::SPLASH;
 
     // A Bluetooth transition is a temporary overlay, not a display-mode or
     // scrollwheel-menu transition.  It can wake a sleeping OLED, and removing
     // the overlay naturally reveals the exact page that was active before it.
+    // Keep the board splash uninterrupted; status reception and timeout still
+    // advance in the background, so only a status that remains active after
+    // the splash may become visible.
     if (!bluetoothOverlayActive && !configMode && isDisplayPowerOff()) {
         return;
     }
 
-    if (bluetoothOverlayActive) {
+    if (bluetoothOverlayActive && !splashScreenActive) {
         setDisplayPower(1);
         gpDisplay->clearScreen();
         gpDisplay->drawText(2, 2, "Bluetooth Status");

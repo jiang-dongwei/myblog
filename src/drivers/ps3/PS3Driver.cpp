@@ -18,6 +18,20 @@ void PS3Driver::initialize() {
     memcpy(deviceDescriptor, &ps3_device_descriptor, descSize);
 
     deviceType = options.inputDeviceType;
+    switch (deviceType) {
+        case InputModeDeviceType::INPUT_MODE_DEVICE_TYPE_GAMEPAD:
+        case InputModeDeviceType::INPUT_MODE_DEVICE_TYPE_WHEEL:
+        case InputModeDeviceType::INPUT_MODE_DEVICE_TYPE_GUITAR:
+        case InputModeDeviceType::INPUT_MODE_DEVICE_TYPE_DRUM:
+        case InputModeDeviceType::INPUT_MODE_DEVICE_TYPE_GAMEPAD_ALT:
+            break;
+        default:
+            // PS3 has no report implementation for Arcade Stick, HOTAS or
+            // Mecha. A subtype can remain in flash after switching from
+            // another USB mode, so fall back to the standard gamepad report.
+            deviceType = InputModeDeviceType::INPUT_MODE_DEVICE_TYPE_GAMEPAD;
+            break;
+    }
 
     if (deviceType == InputModeDeviceType::INPUT_MODE_DEVICE_TYPE_WHEEL) {
         // wheel
@@ -257,7 +271,7 @@ bool PS3Driver::process(Gamepad * gamepad) {
         }
 
         report = (uint8_t*)&ps3Report;
-        report_size = sizeof(ps3Report);
+        report_size = PS3_INPUT_REPORT_SIZE;
     } else if (deviceType != InputModeDeviceType::INPUT_MODE_DEVICE_TYPE_GAMEPAD) {
         if (deviceType == InputModeDeviceType::INPUT_MODE_DEVICE_TYPE_GUITAR) {
             ps3ReportAlt.guitar.padding0[0] = PS3_JOYSTICK_MID;
@@ -560,8 +574,9 @@ uint16_t PS3Driver::get_report(uint8_t report_id, hid_report_type_t report_type,
     //printf("[PS3Driver::get_report] (%02x, %02x, %d)\n", report_id, report_type, reqlen);
 
     if ( report_type == HID_REPORT_TYPE_INPUT ) {
-        memcpy(buffer, &ps3Report, sizeof(PS3Report));
-        return sizeof(PS3Report);
+        const uint16_t reportSize = tu_min16(reqlen, PS3_INPUT_REPORT_SIZE);
+        memcpy(buffer, &ps3Report, reportSize);
+        return reportSize;
     } else if ( report_type == HID_REPORT_TYPE_FEATURE ) {
         uint16_t responseLen = 0;
         uint8_t ctr = 0;

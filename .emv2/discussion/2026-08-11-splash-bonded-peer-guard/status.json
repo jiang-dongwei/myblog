@@ -1,0 +1,14 @@
+{
+  "discussion_id": "2026-08-11-splash-bonded-peer-guard",
+  "created_at": "2026-08-11",
+  "current_phase": 5,
+  "phases": {
+    "split": "completed",
+    "requirements": "completed",
+    "hardware": "completed",
+    "brainstorm": "completed",
+    "milestones": "completed"
+  },
+  "subsystems": ["RP2350 OLED", "ESP32-C6 BLE"],
+  "current_subsystem": 1
+}

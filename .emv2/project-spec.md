@@ -137,6 +137,16 @@
 - 功能: GP22与GP40普通Chase均为2秒一圈；OLED保持60秒空闲休眠，并可由GP2～GP20任意按键、GP30～GP32或蓝牙状态事件唤醒
 - 讨论ID: `2026-08-10-gp22-chase-oled-any-button-wake`
 
+### PS3残留设备类型容错
+- 物理硬件: 无变化，复用现有USB控制器模式与拨轮菜单
+- 功能: Controller Type选择普通模式时清除Web Config残留的设备子类型；PS3启动时将不支持的Arcade/HOTAS/Mecha类型兜底为普通Gamepad；PS3对外输入报告严格匹配HID描述符的49字节长度
+- 讨论ID: `2026-08-10-ps3-device-type-normalization`
+
+### 启动画面保护与绑定设备蓝牙准入
+- 物理硬件: 复用 RP2350B OLED、RP2350B↔ESP32-C6 UART0 和 ESP32-C6 GPIO13 配对按键
+- 功能: 3秒 Splash 期间禁止蓝牙状态覆盖；权威 C6 工程为 `E:\WorkSpace\C_WorkSpacee\ESP-IDF5.2\.espressif\release-v5.2\esp32c6_ble_hid_gamepad_test`，非显式配对时仅向最近绑定设备定向广播，无绑定时等待 GPIO13 的30秒窗口，并拒绝非授权的新连接/重复配对
+- 讨论ID: `2026-08-11-splash-bonded-peer-guard`
+
 ## 开发步骤状态
 
 | 步骤 | 描述 | 状态 | 讨论ID |
@@ -265,3 +275,12 @@
 | S38-B | GP2～GP20任意已消抖按键刷新OLED活动时间并唤醒 | completed | 2026-08-10-gp22-chase-oled-any-button-wake |
 | S38-C | Chase周期、60秒休眠和跨核唤醒路径非编译静态验证 | completed | 2026-08-10-gp22-chase-oled-any-button-wake |
 | S38-D | 构建烧录、双链周期与全部按键唤醒实机验证 | pending | 2026-08-10-gp22-chase-oled-any-button-wake |
+| S39-A | Controller Type保存时归一为普通Gamepad并允许同模式纠错重启 | completed | 2026-08-10-ps3-device-type-normalization |
+| S39-B | PS3驱动启动时将不支持的设备子类型兜底为普通Gamepad | completed | 2026-08-10-ps3-device-type-normalization |
+| S39-C | PS3描述符、报告分支与菜单保存路径非编译静态验证 | completed | 2026-08-10-ps3-device-type-normalization |
+| S39-D | 构建烧录并验证PS3按键输入及其他USB模式回归 | in_progress | 2026-08-10-ps3-device-type-normalization |
+| S39-E | PS3中断IN与GET_REPORT长度统一为描述符声明的49字节 | completed | 2026-08-10-ps3-device-type-normalization |
+| S40-A | Splash期间抑制蓝牙OLED覆盖 | completed | 2026-08-11-splash-bonded-peer-guard |
+| S40-B | C6绑定设备定向广播与无绑定静默 | completed | 2026-08-11-splash-bonded-peer-guard |
+| S40-C | C6陌生连接和Repeat Pairing准入保护 | completed | 2026-08-11-splash-bonded-peer-guard |
+| S40-D | 双端构建烧录与启动/回连/新配对实机回归 | pending | 2026-08-11-splash-bonded-peer-guard |

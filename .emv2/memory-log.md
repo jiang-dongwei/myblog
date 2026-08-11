@@ -793,3 +793,39 @@ Base Effect 和 Key Effect 都需要同时提供两个呼吸灯入口：
 - Core1 DisplayAddon无需新增GPIO读取或跨核共享字段，继续从同一时间戳完成60秒休眠和立即唤醒。
 - 唤醒路径不修改或吞掉游戏输入，不写Flash；GP30/31/32及蓝牙状态唤醒保持原样。
 - 定向静态验证和`git diff --check`通过；按仓库约定未运行编译，等待用户构建烧录和实机复测。
+
+## 2026-08-10: PS3残留设备类型容错 (S39)
+
+- 实机对比为同一USB档位下Switch、PS4、PS5和Xbox输入正常，只有PS3能够枚举但无按键输入，因此排除共享按键扫描、传输选择和菜单输入锁。
+- 根因路径是拨轮Controller Type只保存`inputMode`，会保留Web Config或PS5留下的`inputDeviceType=ARCADE_STICK`；PS3仅在严格等于`GAMEPAD`时生成标准报告，其他值进入备用报告路径。
+- 拨轮菜单现在把八种普通控制器选择统一保存为`GAMEPAD`，并在当前模式相同但子类型错误时仍强制保存和重启。
+- PS3驱动初始化对白名单之外的Arcade Stick、HOTAS和Mecha类型直接回退为标准Gamepad，保证烧录后即使Flash仍有旧值也能立即恢复输入。
+- 保留PS3官方支持的Gamepad Alternate、Wheel、Guitar和Drum；不修改Switch、PS4、PS5、Xbox驱动与Web Config专业配置能力。
+- 按仓库约定不运行编译；定向源代码检查和`git diff --check`完成后由用户构建、烧录并验证。
+- S39-D首轮实机失败：对象文件、ELF和UF2时间戳均晚于源码，确认新修复已进入固件；USB PS3仍能枚举但无按键输入，而蓝牙和其他USB模式正常。问题继续收敛到PS3专用描述符、报告提交或PC主机接收链路，记录于`HVR-S39-001`。
+- Windows设备层确认`VID_054C&PID_0268`、微软`HidUsb`和HID游戏控制器子设备均正常；绕过网页直接监听20秒并持续按键，输入报告数仍为0，排除测试网站和驱动异常。
+- PS3 HID描述符声明48字节数据加Report ID共49字节，原代码却以51字节`sizeof(PS3Report)`提交；已将中断IN发送与控制`GET_REPORT`统一限制为49字节，等待用户自行构建烧录复测。
+
+## 2026-08-11: 启动画面保护与绑定设备蓝牙准入规划 (S40)
+
+- RP2350 的 3 秒 Splash 期间继续接收蓝牙 UART 状态，但不渲染 OLED 蓝牙覆盖页；持续状态可在 Splash 后显示，已过期的 Connected/Disconnected 不补播。
+- ESP32-C6 取消开机自动普通配对窗口；存在绑定时先高占空比、再低占空比定向广播到最近绑定身份地址。
+- 无绑定且未按 GPIO13 时保持不广播；只有 GPIO13 的 30 秒显式窗口允许普通广播和新绑定。
+- 连接建立时记录是否来自显式配对窗口；非显式连接必须来自定向广播，Repeat Pairing 仅对显式配对连接开放。
+- 不改变 GPIO、UART 协议、GP33/GP34 传输使能、蓝牙状态灯或配对窗口时长。
+- 按仓库约定只做静态验证，由用户完成双端构建、烧录和实机回归。
+
+### 讨论ID
+
+`2026-08-11-splash-bonded-peer-guard`
+
+### 实现记录
+
+- 权威 ESP32-C6 工程确认是 `E:\WorkSpace\C_WorkSpacee\ESP-IDF5.2\.espressif\release-v5.2\esp32c6_ble_hid_gamepad_test`；误改的 `E:\ComporyProject\aa\esp32c6_ble_hid_gamepad_test\main\main.c` 已精确恢复到本轮修改前内容（Git blob `fdd1ccb95789d2c860242a055f6037d01677ed01`）。
+- `DisplayAddon` 在 `DisplayMode::SPLASH` 时继续消费和计时蓝牙事件，但跳过蓝牙文字覆盖；Pairing/Connecting 若在 3 秒后仍有效可正常出现，Connected/Disconnected 的 1 秒结果不会延迟补播。
+- ESP32-C6 启动路径不再调用 `open_pairing_window(false)`；恢复最近绑定身份时排队一次高占空比定向突发，结束后保持 200ms 低占空比定向广播。
+- 无绑定且无 GPIO13 窗口时 `manage_advertising()` 主动保持 `ADV_MODE_OFF`；GPIO13 窗口仍使用 30-50ms 普通广播。
+- 每次连接记录 `connection_authorized`、`connection_allows_new_bond` 和最近广播类型；未授权连接不能进入 HID 订阅/报告路径，并会请求断开。
+- 未授权连接不能改写最近绑定身份；未授权加密链接和 Repeat Pairing 会被拒绝。
+- 同步更新 C6 蓝牙架构、功耗说明和 Fightpad12Slim OLED 行为说明；双端 `git diff --check` 通过，未执行构建或烧录。
+- S40-D 等待用户构建烧录并验证完整 3 秒 Logo、旧主机定向回连、无绑定静默和 GPIO13 新配对。

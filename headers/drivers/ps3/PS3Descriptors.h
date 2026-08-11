@@ -34,6 +34,13 @@
 #define ENDPOINT0_SIZE	64
 #define PS3_FEATURES_SIZE 48
 
+// The HID report descriptor declares 48 data bytes for report ID 1. The
+// report ID itself is the first byte on the wire, so Windows expects a total
+// input report length of 49 bytes. PS3Report contains two trailing internal
+// bytes that are not described by the HID report descriptor and must not be
+// sent to the host.
+#define PS3_INPUT_REPORT_SIZE 49
+
 #define GAMEPAD_INTERFACE	0
 #define GAMEPAD_ENDPOINT	1
 #define GAMEPAD_SIZE		64

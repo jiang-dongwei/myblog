@@ -8,7 +8,10 @@ set(sdkVersion 2.2.0)
 set(toolchainVersion 14_2_Rel1)
 set(picotoolVersion 2.2.0-a4)
 set(picoVscode ${USERHOME}/.pico-sdk/cmake/pico-vscode.cmake)
-if (EXISTS ${picoVscode})
+if (DEFINED ENV{PICO_SDK_PATH})
+    # Prefer an explicitly configured external SDK over the extension-managed copy.
+    set(PICO_SDK_PATH $ENV{PICO_SDK_PATH})
+elseif (EXISTS ${picoVscode})
     include(${picoVscode})
 endif()
 # ====================================================================================

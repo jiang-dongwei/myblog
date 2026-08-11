@@ -1,0 +1,13 @@
+{
+  "discussion_id": "2026-08-10-ps3-device-type-normalization",
+  "created_at": "2026-08-10",
+  "current_phase": 5,
+  "flow": "simplified",
+  "phases": {
+    "requirements": "completed",
+    "hardware": "not_applicable",
+    "brainstorm": "skipped_simple_fix",
+    "milestones": "completed"
+  },
+  "subsystems": ["controller_type_menu", "ps3_usb_driver"]
+}

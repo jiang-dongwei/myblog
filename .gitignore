@@ -5,6 +5,8 @@ node_modules/
 configs/MyBoard
 .DS_Store
 build/
+/build-*/
+/.codex-deps/
 
 .*.sw*
 compile_commands.json

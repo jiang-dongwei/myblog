@@ -461,13 +461,21 @@ void ScrollWheelMenuAddon::navSelect() {
 
     // Controller Type directly reuses upstream InputMode values. A changed
     // USB mode needs a forced flash save and reboot so the host sees the new
-    // descriptors on re-enumeration; selecting the active mode is a no-op.
+    // descriptors on re-enumeration. Selecting the active mode is normally a
+    // no-op, except when an incompatible device subtype must be cleared.
     if (currentLevel == SWMenuLevel::CONTROLLER_TYPE) {
         const SWMenuItem* table = currentMenuTable();
         InputMode selectedMode = static_cast<InputMode>(table[idx].targetIndex);
         GamepadOptions& options = Storage::getInstance().getGamepadOptions();
-        if (options.inputMode != selectedMode) {
+        const bool needsGamepadDeviceType =
+            options.inputDeviceType != InputModeDeviceType::INPUT_MODE_DEVICE_TYPE_GAMEPAD;
+        if (options.inputMode != selectedMode || needsGamepadDeviceType) {
             options.inputMode = selectedMode;
+            // The physical Controller Type menu exposes ordinary controller
+            // modes only. Clear a device subtype left by Web Config (for
+            // example PS5 Arcade Stick), otherwise PS3 selects its alternate
+            // report path and can enumerate without reporting button input.
+            options.inputDeviceType = InputModeDeviceType::INPUT_MODE_DEVICE_TYPE_GAMEPAD;
             // RAM-only visual reboot cue. FightpadAmbientLEDAddon sends a
             // final black frame during the existing 500ms save/reboot delay;
             // the saved effect remains intact and returns after reset.

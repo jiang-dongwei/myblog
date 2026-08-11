@@ -42,11 +42,13 @@ Connected:     46 53 02 00 00 00 00 17
 Pairing:       46 53 03 00 00 00 00 16
 ```
 
-The ESP32-C6 sends once when its state changes. `Connecting...` and `Pairing...`
-therefore have no RP2350-side timeout; they remain active until another valid
-status arrives. A terminal `Disconnected` or `Connected` result expires after
-1000ms and the OLED/Base output then returns to the state that existed before
-the notification.
+The ESP32-C6 queues three identical frames for each state transition, spaced
+30ms apart, because this one-way UART notification has no acknowledgement. The
+RP2350 receiver treats the repeats idempotently. `Connecting...` and
+`Pairing...` therefore have no RP2350-side timeout; they remain active until
+another valid status arrives. A terminal `Disconnected` or `Connected` result
+expires after 1000ms and the OLED/Base output then returns to the state that
+existed before the notification.
 
 Fightpad12Slim currently enables
 `FIGHTPAD12SLIM_ESP32_BT_STATUS_DUAL_CHASE=1`. Pairing and Connecting use the
@@ -61,6 +63,12 @@ plain-text ASCII line `C6_DONE\n`, then sends the initial Bluetooth status.
 `C6_DONE` is not an 8-byte binary frame and has no runtime action here. The
 RP2350 receiver safely ignores it while looking for a `0x46 0x49` or
 `0x46 0x53` frame start, so the following status frame remains synchronized.
+
+During the board's 3-second `DisplayMode::SPLASH`, valid Bluetooth status
+frames are still received, timed, and allowed to wake the display, but their
+temporary OLED text overlay is suppressed. After the splash ends, a still-live
+Pairing/Connecting state can render normally; an already-expired 1000ms result
+is not replayed over the startup logo.
 
 The temporary lighting indication may wake GP40 while the saved menu state is
 `All OFF`. The BQ27220 `SOC <= 7%` cutoff remains higher priority and keeps both
