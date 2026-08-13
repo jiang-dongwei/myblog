@@ -65,6 +65,7 @@ enum class SWMenuLevel : uint8_t {
     BATTERY_INFO  = 10, // Battery runtime/config/calibration/charge pages
     BRIGHTNESS    = 11, // Level 2: shared Key/Base effect brightness
     CONTROLLER_TYPE = 12, // Level 1: upstream wired USB input mode picker
+    BLUETOOTH_TYPE  = 13, // Level 1: ESP32-C6 BLE HID profile picker
 };
 
 // Unified runtime effect IDs used by both the GP22 Key chain and GP40 Base
@@ -108,6 +109,9 @@ extern const uint8_t      kMenuBrightnessCount;
 
 extern const SWMenuItem kMenuControllerTypes[];
 extern const uint8_t      kMenuControllerTypesCount;
+
+extern const SWMenuItem kMenuBluetoothTypes[];
+extern const uint8_t      kMenuBluetoothTypesCount;
 
 // ── Cross-core state ─────────────────────────────────────────────────────
 

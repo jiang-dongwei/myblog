@@ -1,5 +1,6 @@
 #include "ButtonLayoutScreen.h"
 #include "addons/fightpad_bq27220_battery.h"
+#include "addons/fightpad_esp32_proxy.h"
 #include "buttonlayouts.h"
 #include "drivermanager.h"
 #include "drivers/ps4/PS4Driver.h"
@@ -25,6 +26,33 @@ namespace
     static constexpr uint8_t BATTERY_PERCENT_PIXEL_Y = BATTERY_PERCENT_TEXT_ROW * 8;
     static constexpr uint8_t BATTERY_PERCENT_PIXEL_WIDTH = 26;
     static constexpr uint8_t BATTERY_PERCENT_PIXEL_HEIGHT = 8;
+
+    const char* getActiveBluetoothControllerLabel(FightpadBluetoothProfile profile)
+    {
+        switch (profile) {
+            case FightpadBluetoothProfile::Xbox:     return "XINPUT";
+            case FightpadBluetoothProfile::PS5PC:    return "PS5";
+            case FightpadBluetoothProfile::Keyboard: return "HID-KB";
+            case FightpadBluetoothProfile::Generic:
+            default:                                 return "USBHID";
+        }
+    }
+
+    InputMode getActiveControllerDisplayMode(InputMode usbInputMode)
+    {
+        FightpadBluetoothProfile bluetoothProfile;
+        if (!getFightpadESP32ActiveBluetoothProfile(bluetoothProfile)) {
+            return usbInputMode;
+        }
+
+        switch (bluetoothProfile) {
+            case FightpadBluetoothProfile::Xbox:     return INPUT_MODE_XINPUT;
+            case FightpadBluetoothProfile::PS5PC:    return INPUT_MODE_PS5;
+            case FightpadBluetoothProfile::Keyboard: return INPUT_MODE_KEYBOARD;
+            case FightpadBluetoothProfile::Generic:
+            default:                                 return INPUT_MODE_GENERIC;
+        }
+    }
 
     std::string getFightpadBatteryDiagnosticText()
     {
@@ -421,6 +449,10 @@ void ButtonLayoutScreen::generateHeader() {
 	}
 
     if (showInputMode) {
+        FightpadBluetoothProfile bluetoothProfile;
+        if (getFightpadESP32ActiveBluetoothProfile(bluetoothProfile)) {
+            statusBar += getActiveBluetoothControllerLabel(bluetoothProfile);
+        } else {
         // Display standard header
         switch (inputMode)
         {
@@ -472,6 +504,7 @@ void ButtonLayoutScreen::generateHeader() {
                 break;
             case INPUT_MODE_KEYBOARD: statusBar += "HID-KB"; break;
             case INPUT_MODE_CONFIG: statusBar += "CONFIG"; break;
+        }
         }
     }
 
@@ -669,7 +702,9 @@ void ButtonLayoutScreen::processInputHistory() {
 		getProcessedGamepad()->pressedA2(),
 	};
 
-	uint8_t mode = ((displayModeLookup.count(inputMode) > 0) ? displayModeLookup.at(inputMode) : 0);
+	const InputMode displayInputMode = getActiveControllerDisplayMode(inputMode);
+	uint8_t mode = ((displayModeLookup.count(displayInputMode) > 0) ?
+	                displayModeLookup.at(displayInputMode) : 0);
 
 	// Check if any new keys have been pressed
 	if (lastInput != currentInput) {

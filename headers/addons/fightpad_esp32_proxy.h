@@ -2,6 +2,7 @@
 #define _FIGHTPAD_ESP32_PROXY_H_
 
 #include "BoardConfig.h"
+#include "addons/fightpad_ble_profile.h"
 #include "gpaddon.h"
 
 #include "hardware/adc.h"
@@ -78,6 +79,18 @@
 
 #ifndef FIGHTPAD12SLIM_ESP32_BT_STATUS_RESULT_MS
 #define FIGHTPAD12SLIM_ESP32_BT_STATUS_RESULT_MS 1000
+#endif
+
+#ifndef FIGHTPAD12SLIM_ESP32_PROFILE_RETRY_MS
+#define FIGHTPAD12SLIM_ESP32_PROFILE_RETRY_MS 250
+#endif
+
+#ifndef FIGHTPAD12SLIM_ESP32_PROFILE_TIMEOUT_MS
+#define FIGHTPAD12SLIM_ESP32_PROFILE_TIMEOUT_MS 2000
+#endif
+
+#ifndef FIGHTPAD12SLIM_ESP32_PROFILE_OVERLAY_MS
+#define FIGHTPAD12SLIM_ESP32_PROFILE_OVERLAY_MS 2500
 #endif
 
 #ifndef FIGHTPAD12SLIM_ESP32_FW_INFO_SDK_SIZE
@@ -186,6 +199,32 @@ bool isFightpadESP32BluetoothStatusEventActive(
     const FightpadESP32BluetoothStatusEvent& event,
     uint32_t now);
 
+enum class FightpadESP32BluetoothProfileStatus : uint8_t {
+    Ready = 0,
+    Applying = 1,
+    PairAgain = 2,
+    ProtocolError = 3,
+    Timeout = 4,
+};
+
+struct FightpadESP32BluetoothProfileEvent {
+    bool valid = false;
+    FightpadESP32BluetoothProfileStatus status = FightpadESP32BluetoothProfileStatus::Ready;
+    FightpadBluetoothProfile profile = FightpadBluetoothProfile::Generic;
+    uint32_t receivedAtMs = 0;
+    uint32_t sequence = 0;
+};
+
+bool getFightpadESP32BluetoothProfileEvent(FightpadESP32BluetoothProfileEvent& event);
+bool isFightpadESP32BluetoothProfileEventActive(
+    const FightpadESP32BluetoothProfileEvent& event,
+    uint32_t now);
+
+// Returns a profile only while the debounced transport selector is in BT mode
+// and ESP32-C6 has acknowledged that profile. Core1 display code uses this
+// instead of showing an unconfirmed menu selection.
+bool getFightpadESP32ActiveBluetoothProfile(FightpadBluetoothProfile& profile);
+
 class FightpadESP32ProxyAddon : public GPAddon {
 public:
     virtual bool available();
@@ -227,6 +266,7 @@ private:
     void handleIncomingFrame(const uint8_t frame[8]);
     void handleFirmwareInfoFrame(const uint8_t frame[8]);
     void handleBluetoothStatusFrame(const uint8_t frame[8]);
+    void handleBluetoothProfileAckFrame(const uint8_t frame[8]);
     void resetFirmwareInfoSequence();
     bool appendFirmwareInfoPayload(const uint8_t payload[4]);
     bool parseFirmwareInfoPayload();
@@ -234,6 +274,10 @@ private:
     bool isBluetoothTransportSelected();
     void updateESP32EnableFromTransport(bool force = false);
     void sendTransportModeFrame(bool bluetoothSelected, bool force = false);
+    void updateBluetoothProfileSync(bool force = false);
+    void beginBluetoothProfileRequest(FightpadBluetoothProfile profile);
+    void sendBluetoothProfileModeFrame(bool force = false);
+    FightpadBluetoothProfile getConfiguredBluetoothProfile() const;
     void sendBatteryStatusFrame(bool force = false);
     void sendInputReportFrame();
     void sendNeutralInputReportFrame();
@@ -279,6 +323,17 @@ private:
     bool transportDebounceStable = false;
     bool transportDebounceValid = false;
     uint32_t transportDebounceCandidateSinceMs = 0;
+    bool profileTransportValid = false;
+    bool profileTransportBluetooth = false;
+    bool profileRequestActive = false;
+    bool profileRetryBlocked = false;
+    bool profileSynchronizedValid = false;
+    FightpadBluetoothProfile profileRequested = FightpadBluetoothProfile::Generic;
+    FightpadBluetoothProfile profileRetryBlockedValue = FightpadBluetoothProfile::Generic;
+    FightpadBluetoothProfile profileSynchronized = FightpadBluetoothProfile::Generic;
+    uint8_t profileRequestSequence = 0;
+    uint32_t profileRequestStartedMs = 0;
+    uint32_t profileLastSendMs = 0;
     bool lastESP32Enabled = false;
     bool lastESP32EnabledValid = false;
     uint32_t lastBatteryStatusTimeMs = 0;

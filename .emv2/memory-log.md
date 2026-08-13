@@ -829,3 +829,43 @@ Base Effect 和 Key Effect 都需要同时提供两个呼吸灯入口：
 - 未授权连接不能改写最近绑定身份；未授权加密链接和 Repeat Pairing 会被拒绝。
 - 同步更新 C6 蓝牙架构、功耗说明和 Fightpad12Slim OLED 行为说明；双端 `git diff --check` 通过，未执行构建或烧录。
 - S40-D 等待用户构建烧录并验证完整 3 秒 Logo、旧主机定向回连、无绑定静默和 GPIO13 新配对。
+
+## 2026-08-12: USB独立的多类型BLE控制器Profile规划 (S41)
+
+- 完成五阶段需求讨论，选择“ESP32-C6单固件、多套启动时选择的BLE Profile”，支持 Xbox、Generic、Keyboard 和实验性 PS5-PC。
+- RP2350作为产品级Profile真值来源，使用独立持久化字段，不复用或修改USB `InputMode`。
+- 跨芯片协议v1保持现有8字节帧和XOR校验，新增RP到C6的`FM` Mode帧及C6到RP的`FA` ACK帧，并使用sequence拒绝旧应答。
+- Profile实际变化时C6持久化pending状态、回复ACK并独立重启；启动时清理不兼容绑定并开启30秒配对。同Profile普通开机只重连，不重新配对。
+- 正式交接文档为`docs/ESP32C6_BLE_PROFILE_HANDOFF.md`；当前阶段先实现RP2350配置、菜单、UART状态机和OLED提示，C6由权威工程另行配套实现。
+
+### RP2350实现记录
+
+- `FightpadESP32ProxyOptions`新增field 12 `bluetoothProfile`，默认Xbox；旧配置缺少字段时由proto默认值迁移，不复用USB `InputMode`。
+- 拨轮主菜单新增`Bluetooth Type`及Xbox/Generic/Keyboard/PS5-PC四项；USB档位只保存，BT档位由Proxy轮询配置后同步，不触发RP2350重启。
+- 新增公共BLE Profile枚举和协议常量；RP发送`FM` v1帧，250ms重试、2秒超时，C6的`FA` ACK必须匹配version、sequence和accepted profile。
+- 超时或协议错误会阻止相同配置的无限重试，直到Profile改变或USB/BT重新切换；`RESTARTING/APPLYING_AT_BOOT`显示`Pair Again`，随后由现有`FS`状态显示Pairing。
+- OLED Profile覆盖页沿用现有蓝牙弹窗和Splash抑制路径，不重新加载旧画面；`Ready`事件会立即清除Applying覆盖。
+- 协作文档中的protobuf字段号已从规划占位值11纠正为实际未占用的12，与源码一致。
+- 已完成菜单分支、Parser允许类型、字段号一致性、协议路径和`git diff --check`非编译静态检查；按仓库约定未运行构建，S41-E等待C6实现及用户双端构建烧录联调。
+- S41联调发现多Profile改造后GPIO13按键不再稳定显示Pairing。RP端`FS 03`解析、OLED与灯效路径完整，物理按键直接属于C6，因此未给RP增加无关补丁。
+- C6权威工程当前`update_ble_status_output()`把`hid_connected`放在`pairing_status_active()`之前，已连接时会遮住用户主动打开的Pairing；`trigger_pairing_mode()`也应立即发送`FS 03`并可靠请求断开旧链路。
+- 已新增`docs/ESP32C6_GPIO13_PAIRING_REGRESSION_HANDOFF.md`，按“按键边沿日志→Transport→状态优先级→断链→快速广播”的顺序交给C6 AI修复；GPIO13电平仅在边沿日志缺失且实测确认后调整。
+- `BLE_PROFILE_FLAG_FORCE_REPAIR`在C6当前仍是no-op，文档要求补完或明确保留TODO；RP当前只发送`APPLY_NOW`，该flag不是物理按键无响应的直接原因。
+
+## 2026-08-13: 当前传输控制器类型统一显示 (S42)
+
+- 主页面不再始终使用RP2350 USB InputMode作为控制器类型来源。
+- Proxy将现有GP33 30ms消抖结果与C6 `FA` ACK确认Profile组合为线程安全跨核快照；
+  BT挡位且ACK有效时才向Core1返回BLE Profile。
+- 切入BT时先使旧确认Profile失效；ACK回来前主页面回退到USB标签，避免把尚未生效的
+  菜单选择显示成当前模式。Profile切换期间保留旧已生效模式，收到新ACK后再更新。
+- BUTTONS主页面BLE映射：Xbox=`XINPUT`、PS5=`PS5`、Generic=`USBHID`、
+  Keyboard=`HID-KB`。根据用户返工意见，USB XInput/XBOne/PS5恢复并保留上游原始
+  `XINPUT`/`XB360`、`XBON*`/`XBONE`和认证状态显示，不为视觉命名改动既有逻辑。
+- 输入历史的A/B/X/Y与PlayStation符号同样按当前有效传输类型选择。
+- 未新增UART帧、未改USB/BLE配置、未新增RP2350重启；定向`git diff --check`通过。
+- 按仓库约定未运行RP2350编译，等待用户构建、烧录和实机验证。
+
+### 讨论ID
+
+`2026-08-13-active-transport-controller-label`

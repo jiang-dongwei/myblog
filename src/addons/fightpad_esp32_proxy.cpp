@@ -18,6 +18,8 @@ constexpr uint8_t kFrameMagicTransport = 0x54;
 constexpr uint8_t kFrameMagicBattery = 0x42;
 constexpr uint8_t kFrameMagicFirmwareInfo = 0x49;
 constexpr uint8_t kFrameMagicBluetoothStatus = 0x53;
+constexpr uint8_t kFrameMagicBluetoothProfileMode = 0x4D;
+constexpr uint8_t kFrameMagicBluetoothProfileAck = 0x41;
 constexpr uint8_t kFrameLength = 8;
 constexpr uint8_t kInputReportGameplayLockFlag = 0x80;
 constexpr uint8_t kFirmwareInfoFlagMask = 0xC0;
@@ -33,6 +35,12 @@ critical_section_t firmwareInfoCriticalSection = {};
 volatile uint32_t firmwareInfoSnapshotVersion = 0;
 FightpadESP32BluetoothStatusEvent bluetoothStatusSnapshot = {};
 critical_section_t bluetoothStatusCriticalSection = {};
+FightpadESP32BluetoothProfileEvent bluetoothProfileSnapshot = {};
+critical_section_t bluetoothProfileCriticalSection = {};
+bool bluetoothTransportSnapshotValid = false;
+bool bluetoothTransportSnapshot = false;
+bool bluetoothActiveProfileSnapshotValid = false;
+FightpadBluetoothProfile bluetoothActiveProfileSnapshot = FightpadBluetoothProfile::Generic;
 
 bool firmwareInfoKeyMatches(const uint8_t *key, size_t keyLength, const char *expected)
 {
@@ -76,6 +84,50 @@ void publishBluetoothStatus(FightpadESP32BluetoothStatus status)
     bluetoothStatusSnapshot.receivedAtMs = getMillis();
     bluetoothStatusSnapshot.sequence++;
     critical_section_exit(&bluetoothStatusCriticalSection);
+}
+
+void publishBluetoothProfileStatus(
+    FightpadESP32BluetoothProfileStatus status,
+    FightpadBluetoothProfile profile)
+{
+    critical_section_enter_blocking(&bluetoothProfileCriticalSection);
+    bluetoothProfileSnapshot.valid = true;
+    bluetoothProfileSnapshot.status = status;
+    bluetoothProfileSnapshot.profile = profile;
+    bluetoothProfileSnapshot.receivedAtMs = getMillis();
+    bluetoothProfileSnapshot.sequence++;
+    critical_section_exit(&bluetoothProfileCriticalSection);
+}
+
+void publishBluetoothTransport(bool bluetoothSelected)
+{
+    if (!critical_section_is_initialized(&bluetoothProfileCriticalSection)) {
+        return;
+    }
+
+    critical_section_enter_blocking(&bluetoothProfileCriticalSection);
+    bluetoothTransportSnapshot = bluetoothSelected;
+    bluetoothTransportSnapshotValid = true;
+    critical_section_exit(&bluetoothProfileCriticalSection);
+}
+
+void publishActiveBluetoothProfile(FightpadBluetoothProfile profile)
+{
+    critical_section_enter_blocking(&bluetoothProfileCriticalSection);
+    bluetoothActiveProfileSnapshot = profile;
+    bluetoothActiveProfileSnapshotValid = true;
+    critical_section_exit(&bluetoothProfileCriticalSection);
+}
+
+void invalidateActiveBluetoothProfile()
+{
+    if (!critical_section_is_initialized(&bluetoothProfileCriticalSection)) {
+        return;
+    }
+
+    critical_section_enter_blocking(&bluetoothProfileCriticalSection);
+    bluetoothActiveProfileSnapshotValid = false;
+    critical_section_exit(&bluetoothProfileCriticalSection);
 }
 }
 
@@ -128,6 +180,45 @@ bool isFightpadESP32BluetoothStatusEventActive(
     }
 
     return (now - event.receivedAtMs) < FIGHTPAD12SLIM_ESP32_BT_STATUS_RESULT_MS;
+}
+
+bool getFightpadESP32BluetoothProfileEvent(FightpadESP32BluetoothProfileEvent& event)
+{
+    event = {};
+    if (!critical_section_is_initialized(&bluetoothProfileCriticalSection)) {
+        return false;
+    }
+
+    critical_section_enter_blocking(&bluetoothProfileCriticalSection);
+    event = bluetoothProfileSnapshot;
+    critical_section_exit(&bluetoothProfileCriticalSection);
+    return event.valid;
+}
+
+bool isFightpadESP32BluetoothProfileEventActive(
+    const FightpadESP32BluetoothProfileEvent& event,
+    uint32_t now)
+{
+    return event.valid &&
+           event.status != FightpadESP32BluetoothProfileStatus::Ready &&
+           (now - event.receivedAtMs) < FIGHTPAD12SLIM_ESP32_PROFILE_OVERLAY_MS;
+}
+
+bool getFightpadESP32ActiveBluetoothProfile(FightpadBluetoothProfile& profile)
+{
+    if (!critical_section_is_initialized(&bluetoothProfileCriticalSection)) {
+        return false;
+    }
+
+    critical_section_enter_blocking(&bluetoothProfileCriticalSection);
+    const bool valid = bluetoothTransportSnapshotValid &&
+                       bluetoothTransportSnapshot &&
+                       bluetoothActiveProfileSnapshotValid;
+    if (valid) {
+        profile = bluetoothActiveProfileSnapshot;
+    }
+    critical_section_exit(&bluetoothProfileCriticalSection);
+    return valid;
 }
 
 #ifndef FIGHTPAD12SLIM_ESP32_PROXY_TRANSPORT_DIAGNOSTIC_PIN
@@ -192,6 +283,9 @@ void FightpadESP32ProxyAddon::setup()
     }
     if (!critical_section_is_initialized(&bluetoothStatusCriticalSection)) {
         critical_section_init(&bluetoothStatusCriticalSection);
+    }
+    if (!critical_section_is_initialized(&bluetoothProfileCriticalSection)) {
+        critical_section_init(&bluetoothProfileCriticalSection);
     }
 
     if (isValidPin(FIGHTPAD12SLIM_TRANSPORT_SEL_PIN)) {
@@ -258,6 +352,7 @@ void FightpadESP32ProxyAddon::setup()
     initialized = true;
     setTransportDiagnosticPin(isBluetoothTransportSelected());
     sendTransportModeFrame(isBluetoothTransportSelected(), true);
+    updateBluetoothProfileSync(true);
     sendBatteryStatusFrame(true);
 #if FIGHTPAD12SLIM_ESP32_PROXY_CDC_DESC_ENABLED
     if (autoDtrRts && isValidPin(resetPin)) {
@@ -283,6 +378,8 @@ void FightpadESP32ProxyAddon::process()
 
     drainUartToBuffer();
 
+    updateBluetoothProfileSync();
+
 #if FIGHTPAD12SLIM_ESP32_PROXY_CDC_DESC_ENABLED
     drainBufferToCdc();
 #endif
@@ -306,6 +403,11 @@ void FightpadESP32ProxyAddon::reinit()
     resetFirmwareInfoSequence();
     lastInputReportValid = false;
     lastTransportModeValid = false;
+    profileTransportValid = false;
+    profileRequestActive = false;
+    profileRetryBlocked = false;
+    profileSynchronizedValid = false;
+    invalidateActiveBluetoothProfile();
     lastESP32EnabledValid = false;
     updateESP32EnableFromTransport(true);
     lastBatteryPercentValid = false;
@@ -517,7 +619,9 @@ void FightpadESP32ProxyAddon::feedIncomingFrameByte(uint8_t value)
     }
 
     if (incomingFrameLength == 1) {
-        if (value == kFrameMagicFirmwareInfo || value == kFrameMagicBluetoothStatus) {
+        if (value == kFrameMagicFirmwareInfo ||
+            value == kFrameMagicBluetoothStatus ||
+            value == kFrameMagicBluetoothProfileAck) {
             incomingFrame[1] = value;
             incomingFrameLength = 2;
             incomingFrameLastByteTimeMs = now;
@@ -570,7 +674,8 @@ void FightpadESP32ProxyAddon::resyncIncomingFrame()
         }
 
         if (incomingFrame[i + 1] == kFrameMagicFirmwareInfo ||
-            incomingFrame[i + 1] == kFrameMagicBluetoothStatus) {
+            incomingFrame[i + 1] == kFrameMagicBluetoothStatus ||
+            incomingFrame[i + 1] == kFrameMagicBluetoothProfileAck) {
             preservedStart = i;
             preservedLength = kFrameLength - i;
             break;
@@ -595,6 +700,9 @@ void FightpadESP32ProxyAddon::handleIncomingFrame(const uint8_t frame[8])
     case kFrameMagicBluetoothStatus:
         handleBluetoothStatusFrame(frame);
         break;
+    case kFrameMagicBluetoothProfileAck:
+        handleBluetoothProfileAckFrame(frame);
+        break;
     default:
         break;
     }
@@ -607,6 +715,86 @@ void FightpadESP32ProxyAddon::handleBluetoothStatusFrame(const uint8_t frame[8])
     }
 
     publishBluetoothStatus(static_cast<FightpadESP32BluetoothStatus>(frame[2]));
+}
+
+void FightpadESP32ProxyAddon::handleBluetoothProfileAckFrame(const uint8_t frame[8])
+{
+    if (!profileRequestActive || frame[4] != profileRequestSequence) {
+        return;
+    }
+
+    auto failRequest = [this]() {
+        profileRequestActive = false;
+        profileSynchronizedValid = false;
+        profileRetryBlocked = true;
+        profileRetryBlockedValue = profileRequested;
+        publishBluetoothProfileStatus(
+            FightpadESP32BluetoothProfileStatus::ProtocolError,
+            profileRequested);
+    };
+
+    if (frame[2] != FIGHTPAD_BLE_PROFILE_PROTOCOL_VERSION ||
+        !isValidFightpadBluetoothProfile(frame[3]) ||
+        frame[5] > static_cast<uint8_t>(FightpadBluetoothProfileAckResult::InternalError)) {
+        failRequest();
+        return;
+    }
+
+    const FightpadBluetoothProfile acceptedProfile =
+        static_cast<FightpadBluetoothProfile>(frame[3]);
+    const FightpadBluetoothProfileAckResult result =
+        static_cast<FightpadBluetoothProfileAckResult>(frame[5]);
+
+    switch (result) {
+    case FightpadBluetoothProfileAckResult::ActiveUnchanged:
+        if (acceptedProfile != profileRequested) {
+            failRequest();
+            return;
+        }
+        profileRequestActive = false;
+        profileRetryBlocked = false;
+        profileSynchronized = acceptedProfile;
+        profileSynchronizedValid = true;
+        publishActiveBluetoothProfile(acceptedProfile);
+        publishBluetoothProfileStatus(
+            FightpadESP32BluetoothProfileStatus::Ready,
+            acceptedProfile);
+        break;
+
+    case FightpadBluetoothProfileAckResult::Restarting:
+    case FightpadBluetoothProfileAckResult::ApplyingAtBoot:
+        if (acceptedProfile != profileRequested) {
+            failRequest();
+            return;
+        }
+        profileRequestActive = false;
+        profileRetryBlocked = false;
+        profileSynchronized = acceptedProfile;
+        profileSynchronizedValid = true;
+        publishActiveBluetoothProfile(acceptedProfile);
+        publishBluetoothProfileStatus(
+            FightpadESP32BluetoothProfileStatus::PairAgain,
+            acceptedProfile);
+        break;
+
+    case FightpadBluetoothProfileAckResult::InvalidFallback:
+        profileRequestActive = false;
+        profileSynchronized = acceptedProfile;
+        profileSynchronizedValid = true;
+        publishActiveBluetoothProfile(acceptedProfile);
+        profileRetryBlocked = true;
+        profileRetryBlockedValue = profileRequested;
+        publishBluetoothProfileStatus(
+            FightpadESP32BluetoothProfileStatus::ProtocolError,
+            acceptedProfile);
+        break;
+
+    case FightpadBluetoothProfileAckResult::UnsupportedVersion:
+    case FightpadBluetoothProfileAckResult::InternalError:
+    default:
+        failRequest();
+        break;
+    }
 }
 
 void FightpadESP32ProxyAddon::handleFirmwareInfoFrame(const uint8_t frame[8])
@@ -769,6 +957,7 @@ void FightpadESP32ProxyAddon::refreshTurboPinMask()
 bool FightpadESP32ProxyAddon::isBluetoothTransportSelected()
 {
     if (!isValidPin(FIGHTPAD12SLIM_TRANSPORT_SEL_PIN)) {
+        publishBluetoothTransport(true);
         return true;
     }
 
@@ -781,6 +970,7 @@ bool FightpadESP32ProxyAddon::isBluetoothTransportSelected()
         transportDebounceStable = rawBluetoothSelected;
         transportDebounceCandidateSinceMs = now;
         transportDebounceValid = true;
+        publishBluetoothTransport(transportDebounceStable);
         return transportDebounceStable;
     }
 
@@ -792,6 +982,7 @@ bool FightpadESP32ProxyAddon::isBluetoothTransportSelected()
         transportDebounceStable = transportDebounceCandidate;
     }
 
+    publishBluetoothTransport(transportDebounceStable);
     return transportDebounceStable;
 }
 
@@ -855,6 +1046,126 @@ void FightpadESP32ProxyAddon::sendTransportModeFrame(bool bluetoothSelected, boo
     lastTransportMode = bluetoothSelected;
     lastTransportModeValid = true;
     lastTransportModeTimeMs = now;
+}
+
+FightpadBluetoothProfile FightpadESP32ProxyAddon::getConfiguredBluetoothProfile() const
+{
+    const FightpadESP32ProxyOptions& options =
+        Storage::getInstance().getAddonOptions().fightpadESP32ProxyOptions;
+    return normalizeFightpadBluetoothProfile(options.bluetoothProfile);
+}
+
+void FightpadESP32ProxyAddon::beginBluetoothProfileRequest(FightpadBluetoothProfile profile)
+{
+    profileRequestSequence++;
+    profileRequested = profile;
+    profileRequestActive = true;
+    profileRetryBlocked = false;
+    profileRequestStartedMs = getMillis();
+    profileLastSendMs = profileRequestStartedMs;
+
+    publishBluetoothProfileStatus(
+        FightpadESP32BluetoothProfileStatus::Applying,
+        profile);
+    sendBluetoothProfileModeFrame(true);
+}
+
+void FightpadESP32ProxyAddon::sendBluetoothProfileModeFrame(bool force)
+{
+    if (!initialized || !profileRequestActive) {
+        return;
+    }
+
+    const uint32_t now = getMillis();
+    if (!force &&
+        (now - profileLastSendMs) < FIGHTPAD12SLIM_ESP32_PROFILE_RETRY_MS) {
+        return;
+    }
+
+    uint8_t frame[8] = {
+        kFrameMagic0,
+        kFrameMagicBluetoothProfileMode,
+        FIGHTPAD_BLE_PROFILE_PROTOCOL_VERSION,
+        static_cast<uint8_t>(profileRequested),
+        profileRequestSequence,
+        FIGHTPAD_BLE_PROFILE_FLAG_APPLY_NOW,
+        0x00,
+        0x00,
+    };
+
+    for (uint8_t i = 0; i < sizeof(frame) - 1; i++) {
+        frame[sizeof(frame) - 1] ^= frame[i];
+    }
+
+    writeUartFrame(frame);
+    profileLastSendMs = now;
+}
+
+void FightpadESP32ProxyAddon::updateBluetoothProfileSync(bool force)
+{
+    const bool bluetoothSelected = isBluetoothTransportSelected();
+    const bool transportChanged =
+        !profileTransportValid || profileTransportBluetooth != bluetoothSelected;
+
+    if (transportChanged) {
+        profileTransportValid = true;
+        profileTransportBluetooth = bluetoothSelected;
+        profileRequestActive = false;
+        profileRetryBlocked = false;
+        profileSynchronizedValid = false;
+
+        if (bluetoothSelected) {
+            /* Do not expose a profile from the previous BT session until the
+             * newly powered C6 confirms its active profile with FA ACK. */
+            invalidateActiveBluetoothProfile();
+        } 
+
+        if (!bluetoothSelected) {
+            publishBluetoothProfileStatus(
+                FightpadESP32BluetoothProfileStatus::Ready,
+                getConfiguredBluetoothProfile());
+            return;
+        }
+    }
+
+    if (!bluetoothSelected) {
+        return;
+    }
+
+    const FightpadBluetoothProfile configuredProfile = getConfiguredBluetoothProfile();
+
+    if (profileRequestActive && configuredProfile != profileRequested) {
+        beginBluetoothProfileRequest(configuredProfile);
+        return;
+    }
+
+    if (profileRequestActive) {
+        const uint32_t now = getMillis();
+        if ((now - profileRequestStartedMs) >= FIGHTPAD12SLIM_ESP32_PROFILE_TIMEOUT_MS) {
+            profileRequestActive = false;
+            profileSynchronizedValid = false;
+            profileRetryBlocked = true;
+            profileRetryBlockedValue = profileRequested;
+            publishBluetoothProfileStatus(
+                FightpadESP32BluetoothProfileStatus::Timeout,
+                profileRequested);
+            return;
+        }
+
+        sendBluetoothProfileModeFrame(force);
+        return;
+    }
+
+    if (profileRetryBlocked) {
+        if (configuredProfile == profileRetryBlockedValue) {
+            return;
+        }
+        profileRetryBlocked = false;
+    }
+
+    if (!profileSynchronizedValid || profileSynchronized != configuredProfile) {
+        beginBluetoothProfileRequest(configuredProfile);
+    }
 }
 
 bool FightpadESP32ProxyAddon::batteryMonitoringSupported() const

@@ -907,6 +907,7 @@ message FightpadESP32ProxyOptions
     optional int32 rtsPin = 9;
     optional bool useFlowControl = 10;
     optional bool autoDtrRts = 11;
+    optional uint32 bluetoothProfile = 12 [default = 1];
 }
 
 // Fightpad12Slim ambient LED menu persistence.

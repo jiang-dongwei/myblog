@@ -809,6 +809,9 @@ void ConfigUtils::initUnsetPropertiesWithDefaults(Config& config)
     INIT_UNSET_PROPERTY(config.addonOptions.fightpadESP32ProxyOptions, rtsPin, FIGHTPAD12SLIM_ESP32_PROXY_UART_RTS_PIN);
     INIT_UNSET_PROPERTY(config.addonOptions.fightpadESP32ProxyOptions, useFlowControl, !!FIGHTPAD12SLIM_ESP32_PROXY_USE_FLOW_CONTROL);
     INIT_UNSET_PROPERTY(config.addonOptions.fightpadESP32ProxyOptions, autoDtrRts, !!FIGHTPAD12SLIM_ESP32_PROXY_AUTO_DTR_RTS);
+    // Bluetooth Profile is persisted independently from the wired USB input
+    // mode. Proto value 1 is the Xbox Profile default.
+    INIT_UNSET_PROPERTY(config.addonOptions.fightpadESP32ProxyOptions, bluetoothProfile, 1u);
 
     // addonOptions.fightpadAmbientLEDOptions
     // 0xFF = "never set by menu" → use default DIP-switch cycling / white flash.

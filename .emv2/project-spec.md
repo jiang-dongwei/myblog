@@ -147,6 +147,17 @@
 - 功能: 3秒 Splash 期间禁止蓝牙状态覆盖；权威 C6 工程为 `E:\WorkSpace\C_WorkSpacee\ESP-IDF5.2\.espressif\release-v5.2\esp32c6_ble_hid_gamepad_test`，非显式配对时仅向最近绑定设备定向广播，无绑定时等待 GPIO13 的30秒窗口，并拒绝非授权的新连接/重复配对
 - 讨论ID: `2026-08-11-splash-bonded-peer-guard`
 
+### USB独立的多类型BLE控制器Profile
+- 物理硬件: 复用 RP2350B↔ESP32-C6 UART0、GP33/GP34传输使能、GPIO13配对按键和现有OLED
+- 功能: 新增独立 Bluetooth Type 菜单，支持 Xbox/Generic/Keyboard/PS5-PC；RP2350持久化选择并通过版本化Mode/ACK协议同步到C6，Profile变化时仅重启C6并进入30秒重新配对
+- 讨论ID: `2026-08-12-ble-controller-profiles`
+
+### 当前传输控制器类型统一显示
+- 物理硬件: 无新增硬件，复用 GP33 传输选择、RP2350↔ESP32-C6 UART0 和现有 OLED
+- 功能: USB挡位按RP2350 InputMode和上游原始标签显示，BT挡位按C6 `FA` ACK确认的
+  BLE Profile显示；BLE Xbox使用`XINPUT`、BLE PS5使用`PS5`，并同步输入历史按钮命名
+- 讨论ID: `2026-08-13-active-transport-controller-label`
+
 ## 开发步骤状态
 
 | 步骤 | 描述 | 状态 | 讨论ID |
@@ -284,3 +295,14 @@
 | S40-B | C6绑定设备定向广播与无绑定静默 | completed | 2026-08-11-splash-bonded-peer-guard |
 | S40-C | C6陌生连接和Repeat Pairing准入保护 | completed | 2026-08-11-splash-bonded-peer-guard |
 | S40-D | 双端构建烧录与启动/回连/新配对实机回归 | pending | 2026-08-11-splash-bonded-peer-guard |
+| S41-A | BLE Profile配置字段、默认值与Bluetooth Type菜单 | completed | 2026-08-12-ble-controller-profiles |
+| S41-B | RP2350 Mode发送、ACK解析、sequence与超时重试 | completed | 2026-08-12-ble-controller-profiles |
+| S41-C | OLED Applying/Pair Again/Protocol Error状态接入 | completed | 2026-08-12-ble-controller-profiles |
+| S41-D | 双工程协议、映射、状态机与验收交接文档 | completed | 2026-08-12-ble-controller-profiles |
+| S41-E | RP侧非编译静态验证及双端构建烧录实机联调 | in_progress | 2026-08-12-ble-controller-profiles |
+| S41-F | GPIO13配对回归定位与ESP32-C6精确修复任务书 | completed | 2026-08-12-ble-controller-profiles |
+| S41-G | C6端Pairing优先级、按键边沿、断链广播与双端实机验证 | pending | 2026-08-12-ble-controller-profiles |
+| S42-A | 发布已消抖BT挡位与C6 ACK确认Profile的跨核快照 | completed | 2026-08-13-active-transport-controller-label |
+| S42-B | BUTTONS主页面和输入历史按当前传输显示类型并保留USB原始标签 | completed | 2026-08-13-active-transport-controller-label |
+| S42-C | ACK前回退、USB/BT隔离、标签映射和差异非编译静态验证 | completed | 2026-08-13-active-transport-controller-label |
+| S42-D | RP2350构建烧录与USB/BT Xbox/PS5主页面实机验证 | pending | 2026-08-13-active-transport-controller-label |

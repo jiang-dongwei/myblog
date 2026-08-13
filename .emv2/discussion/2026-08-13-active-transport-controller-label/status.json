@@ -1,0 +1,14 @@
+{
+  "discussion_id": "2026-08-13-active-transport-controller-label",
+  "created_at": "2026-08-13",
+  "current_phase": 5,
+  "phases": {
+    "split": "completed",
+    "requirements": "completed",
+    "hardware": "completed",
+    "brainstorm": "completed",
+    "milestones": "completed"
+  },
+  "subsystems": ["UART Profile ACK", "Transport State", "OLED Header"],
+  "current_subsystem": 2
+}

@@ -2,6 +2,37 @@
 
 ## 当前问题
 
+### [2026-08-12] 多 BLE Profile 改造后 GPIO13 配对无 Pairing
+
+- **状态**: handoff_ready
+- **步骤**: S41-F / S41-G
+- **发现时间**: 2026-08-12
+- **相关HVR**: -
+- **描述**: ESP32-C6 增加多 Profile、绑定准入和定向重连后，实体 BT 挡按下 GPIO13 配对键，OLED 没有稳定进入 Pairing；此前单 Profile 固件的按键响应正常。
+
+### 分析
+
+- GPIO13 直接属于 ESP32-C6，RP2350 已具备 `FS status=0x03` 解析、Pairing OLED 页面和灯效，因此问题主路径不在 RP2350。
+- C6 当前 `update_ble_status_output()` 先判断 `hid_connected`，后判断 `pairing_status_active()`；已连接时显式 Pairing 会被 Connected 遮住。
+- `trigger_pairing_mode()` 打开窗口后只异步请求断链，应立即发送 Pairing 状态，并确保断链期间 Pairing 优先级不被覆盖。
+- C6 使用启动瞬间采样的 `s_pair_button_idle_level` 判断按下方向；若日志没有 `pair button debounced: pressed`，需按实测电平改为明确有效电平。
+- `BLE_PROFILE_FLAG_FORCE_REPAIR` 当前在 C6 仅记录日志、没有动作；它不是 GPIO13 的直接原因，但属于协议未完成项。
+
+### 解决方案
+
+- 已新增 `docs/ESP32C6_GPIO13_PAIRING_REGRESSION_HANDOFF.md`，要求 C6 端将 Pairing 提升到 Connected 之上、按键触发后立即发送 `FS 03`、可靠断开旧链路并保持30秒快速普通广播。
+- 只有按键边沿日志缺失时才修改 GPIO13 电平判定，并以实测“释放/按下”电平为依据。
+- RP2350 本轮不增加无关源码补丁；等待 ESP32-C6 AI 修改、构建和双端实机验证。
+
+### 闭环记录
+
+- **解决日期**: -
+- **解决方案**: C6修复任务书已完成，源码与实机修复待执行
+- **验证方式**: GPIO13按键日志、`FS 03`、OLED Pairing、断链及30秒广播完整链路
+- **证据**: `docs/ESP32C6_GPIO13_PAIRING_REGRESSION_HANDOFF.md`
+
+---
+
 ### [2026-08-10] USB PS3模式能枚举但无按键输入
 
 - **状态**: in_progress

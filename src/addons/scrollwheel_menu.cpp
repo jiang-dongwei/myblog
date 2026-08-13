@@ -1,4 +1,5 @@
 #include "addons/scrollwheel_menu.h"
+#include "addons/fightpad_ble_profile.h"
 #include "gamepad.h"
 #include "helper.h"
 #include "storagemanager.h"
@@ -81,6 +82,7 @@ const SWMenuItem kMenuMain[] = {
 #endif
     { "RGB Customize",      SWMenuLevel::RGB_SUB, 0 },
     { "Controller Type",    SWMenuLevel::CONTROLLER_TYPE, 0 },
+    { "Bluetooth Type",     SWMenuLevel::BLUETOOTH_TYPE, 0 },
 };
 const uint8_t kMenuMainCount = sizeof(kMenuMain) / sizeof(kMenuMain[0]);
 
@@ -98,6 +100,15 @@ const SWMenuItem kMenuControllerTypes[] = {
 };
 const uint8_t kMenuControllerTypesCount =
     sizeof(kMenuControllerTypes) / sizeof(kMenuControllerTypes[0]);
+
+const SWMenuItem kMenuBluetoothTypes[] = {
+    { "XBOX BLE",     SWMenuLevel::INFO, static_cast<uint8_t>(FightpadBluetoothProfile::Xbox) },
+    { "GENERIC BLE",  SWMenuLevel::INFO, static_cast<uint8_t>(FightpadBluetoothProfile::Generic) },
+    { "KEYBOARD BLE", SWMenuLevel::INFO, static_cast<uint8_t>(FightpadBluetoothProfile::Keyboard) },
+    { "PS5 BLE (PC)", SWMenuLevel::INFO, static_cast<uint8_t>(FightpadBluetoothProfile::PS5PC) },
+};
+const uint8_t kMenuBluetoothTypesCount =
+    sizeof(kMenuBluetoothTypes) / sizeof(kMenuBluetoothTypes[0]);
 
 const SWMenuItem kMenuRgbSub[] = {
     { "Key Flash",           SWMenuLevel::COLOR,  0 },
@@ -274,6 +285,7 @@ const SWMenuItem* ScrollWheelMenuAddon::currentMenuTable() const {
         case SWMenuLevel::LIGHT_EFFECT:   return kMenuLightEffects;
         case SWMenuLevel::BRIGHTNESS:     return kMenuBrightness;
         case SWMenuLevel::CONTROLLER_TYPE:return kMenuControllerTypes;
+        case SWMenuLevel::BLUETOOTH_TYPE: return kMenuBluetoothTypes;
         case SWMenuLevel::BATTERY_INFO:   return kMenuMain;
         default:                          return kMenuMain;
     }
@@ -290,6 +302,7 @@ uint8_t ScrollWheelMenuAddon::currentItemCount() const {
         case SWMenuLevel::LIGHT_EFFECT:   return kMenuLightEffectsCount;
         case SWMenuLevel::BRIGHTNESS:     return kMenuBrightnessCount;
         case SWMenuLevel::CONTROLLER_TYPE:return kMenuControllerTypesCount;
+        case SWMenuLevel::BLUETOOTH_TYPE: return kMenuBluetoothTypesCount;
         case SWMenuLevel::BATTERY_INFO:   return SW_BATTERY_PAGE_COUNT;
         default:                          return kMenuMainCount;
     }
@@ -326,6 +339,7 @@ static void clampScrollOffset() {
         case SWMenuLevel::LIGHT_EFFECT:   count = kMenuLightEffectsCount; break;
         case SWMenuLevel::BRIGHTNESS:     count = kMenuBrightnessCount; break;
         case SWMenuLevel::CONTROLLER_TYPE:count = kMenuControllerTypesCount; break;
+        case SWMenuLevel::BLUETOOTH_TYPE: count = kMenuBluetoothTypesCount; break;
         case SWMenuLevel::BATTERY_INFO:   count = SW_BATTERY_PAGE_COUNT; break;
         default: return;
     }
@@ -486,6 +500,25 @@ void ScrollWheelMenuAddon::navSelect() {
         return;
     }
 
+    // Bluetooth Type is independent from the wired USB InputMode. Persist the
+    // product selection without rebooting RP2350; FightpadESP32ProxyAddon
+    // observes the option and synchronizes it only while BT transport is active.
+    if (currentLevel == SWMenuLevel::BLUETOOTH_TYPE) {·
+        const SWMenuItem* table = currentMenuTable();
+        const uint8_t selectedProfile = table[idx].targetIndex;
+        FightpadESP32ProxyOptions& options =
+            Storage::getInstance().getAddonOptions().fightpadESP32ProxyOptions;
+        if (isValidFightpadBluetoothProfile(selectedProfile) &&
+            (!options.has_bluetoothProfile ||
+             options.bluetoothProfile != selectedProfile)) {
+            options.has_bluetoothProfile = true;
+            options.bluetoothProfile = selectedProfile;
+            EventManager::getInstance().triggerEvent(new GPStorageSaveEvent(false));
+        }
+        markMenuDirty();
+        return;
+    }
+
     if (currentLevel == SWMenuLevel::INFO) {
         if (g_menuState.infoSource == 0) {
             g_menuState.level = static_cast<uint8_t>(SWMenuLevel::MAIN);
@@ -531,6 +564,18 @@ void ScrollWheelMenuAddon::navSelect() {
             g_menuState.index = 0;
             for (uint8_t i = 0; i < kMenuControllerTypesCount; i++) {
                 if (kMenuControllerTypes[i].targetIndex == currentMode) {
+                    g_menuState.index = i;
+                    break;
+                }
+            }
+        } else if (target == SWMenuLevel::BLUETOOTH_TYPE) {
+            const uint8_t currentProfile = static_cast<uint8_t>(
+                normalizeFightpadBluetoothProfile(
+                    Storage::getInstance().getAddonOptions()
+                        .fightpadESP32ProxyOptions.bluetoothProfile));
+            g_menuState.index = 0;
+            for (uint8_t i = 0; i < kMenuBluetoothTypesCount; i++) {
+                if (kMenuBluetoothTypes[i].targetIndex == currentProfile) {
                     g_menuState.index = i;
                     break;
                 }
@@ -581,6 +626,7 @@ void ScrollWheelMenuAddon::navBack() {
         break;
     case SWMenuLevel::BATTERY_INFO:
     case SWMenuLevel::CONTROLLER_TYPE:
+    case SWMenuLevel::BLUETOOTH_TYPE:
         g_menuState.level = static_cast<uint8_t>(SWMenuLevel::MAIN);
         g_menuState.index = mainIndex;
         g_menuState.scrollOffset = 0;

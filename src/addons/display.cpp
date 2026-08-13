@@ -242,8 +242,22 @@ void DisplayAddon::process() {
         prevMillis = now;
     }
 
+    FightpadESP32BluetoothProfileEvent bluetoothProfileEvent = {};
+    const bool hasBluetoothProfileEvent =
+        getFightpadESP32BluetoothProfileEvent(bluetoothProfileEvent);
+    if (hasBluetoothProfileEvent &&
+        bluetoothProfileEvent.sequence != lastBluetoothProfileSequence) {
+        lastBluetoothProfileSequence = bluetoothProfileEvent.sequence;
+        lastBluetoothStatusActivityMs = now;
+        bluetoothStatusActivityValid = true;
+        displaySaverTimer = displaySaverTimeout;
+        prevMillis = now;
+    }
+
     const bool bluetoothOverlayActive = hasBluetoothEvent &&
         isFightpadESP32BluetoothStatusEventActive(bluetoothEvent, now);
+    const bool bluetoothProfileOverlayActive = hasBluetoothProfileEvent &&
+        isFightpadESP32BluetoothProfileEventActive(bluetoothProfileEvent, now);
     const bool splashScreenActive = !configMode &&
         currDisplayMode == DisplayMode::SPLASH;
 
@@ -253,7 +267,39 @@ void DisplayAddon::process() {
     // Keep the board splash uninterrupted; status reception and timeout still
     // advance in the background, so only a status that remains active after
     // the splash may become visible.
-    if (!bluetoothOverlayActive && !configMode && isDisplayPowerOff()) {
+    if (!bluetoothOverlayActive && !bluetoothProfileOverlayActive &&
+        !configMode && isDisplayPowerOff()) {
+        return;
+    }
+
+    if (bluetoothProfileOverlayActive && !splashScreenActive) {
+        setDisplayPower(1);
+        gpDisplay->clearScreen();
+        gpDisplay->drawText(3, 1, "Bluetooth Type");
+        gpDisplay->drawText(
+            4,
+            3,
+            getFightpadBluetoothProfileLabel(bluetoothProfileEvent.profile));
+
+        switch (bluetoothProfileEvent.status) {
+        case FightpadESP32BluetoothProfileStatus::Applying:
+            gpDisplay->drawText(5, 5, "Applying...");
+            break;
+        case FightpadESP32BluetoothProfileStatus::PairAgain:
+            gpDisplay->drawText(5, 5, "Pair Again");
+            break;
+        case FightpadESP32BluetoothProfileStatus::Timeout:
+            gpDisplay->drawText(4, 5, "Sync Timeout");
+            break;
+        case FightpadESP32BluetoothProfileStatus::ProtocolError:
+            gpDisplay->drawText(3, 5, "Protocol Error");
+            break;
+        case FightpadESP32BluetoothProfileStatus::Ready:
+        default:
+            break;
+        }
+
+        gpDisplay->render();
         return;
     }
 
@@ -643,6 +689,8 @@ void DisplayAddon::drawScrollWheelMenu() {
             table = kMenuBrightness; count = kMenuBrightnessCount; break;
         case SWMenuLevel::CONTROLLER_TYPE:
             table = kMenuControllerTypes; count = kMenuControllerTypesCount; break;
+        case SWMenuLevel::BLUETOOTH_TYPE:
+            table = kMenuBluetoothTypes; count = kMenuBluetoothTypesCount; break;
         case SWMenuLevel::BATTERY_INFO:
             break;
         default: break;
@@ -672,6 +720,11 @@ void DisplayAddon::drawScrollWheelMenu() {
         case SWMenuLevel::BRIGHTNESS:          activeVal = g_menuBrightnessLevel; break;
         case SWMenuLevel::CONTROLLER_TYPE:
             activeVal = static_cast<uint8_t>(Storage::getInstance().getGamepadOptions().inputMode);
+            break;
+        case SWMenuLevel::BLUETOOTH_TYPE:
+            activeVal = static_cast<uint8_t>(normalizeFightpadBluetoothProfile(
+                Storage::getInstance().getAddonOptions()
+                    .fightpadESP32ProxyOptions.bluetoothProfile));
             break;
         default: break;
     }
