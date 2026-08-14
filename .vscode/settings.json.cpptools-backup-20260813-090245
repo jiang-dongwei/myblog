@@ -7,19 +7,12 @@
   },
   "idf.buildPath": "${workspaceFolder}/build",
   "idf.flashType": "UART",
-  "idf.portWin": "COM21",
+  "idf.portWin": "COM19",
   "idf.monitorPort": "COM19",
   "clangd.path": "E:\\WorkSpace\\C_WorkSpacee\\ESP-IDF5.2\\.espressif\\release-v5.2\\tools\\esp-clang\\16.0.1-fe4f10a809\\esp-clang\\bin\\clangd.exe",
   "clangd.arguments": [
     "--background-index",
     "--query-driver=**",
     "--compile-commands-dir=e:\\WorkSpace\\C_WorkSpacee\\ESP-IDF5.2\\.espressif\\release-v5.2\\esp32c6_ble_hid_gamepad_test\\build"
-  ],
-  "C_Cpp.intelliSenseEngine": "disabled",
-  "files.watcherExclude": {
-    "**/build/**": true
-  },
-  "search.exclude": {
-    "**/build/**": true
-  }
+  ]
 }

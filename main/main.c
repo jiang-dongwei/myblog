@@ -3,6 +3,8 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "sdkconfig.h"
+
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
@@ -14,6 +16,7 @@
 #include "esp_hid_common.h"
 #include "esp_log.h"
 #include "esp_idf_version.h"
+#include "esp_system.h"
 #include "nvs_flash.h"
 
 #include "driver/gpio.h"
@@ -32,12 +35,15 @@
 #include "store/config/ble_store_config.h"
 
 #include "gameplay_gate.h"
+#include "ble_profile_state.h"
+#include "ble_profile_store.h"
+#include "ble_profiles.h"
+#include "uart_protocol.h"
 
-#define DEVICE_NAME "FP12Slim-C6"
-#define HID_REPORT_ID_GAMEPAD 1
-#define HID_REPORT_MAP_INDEX 0
-#define HID_GAMEPAD_REPORT_LEN 5
-#define HID_NEUTRAL_HAT 0x08
+#if CONFIG_BT_NIMBLE_SVC_HID_MAX_RPTS < 2
+#error "Xbox Series X|S 1914 requires at least two NimBLE HID Report characteristics"
+#endif
+
 #define HID_REPORT_INTERVAL_MS 10
 #define HID_REPORT_KEEPALIVE_MS 50
 
@@ -46,18 +52,20 @@
 #define UART_INPUT_TX_PIN 16
 #define UART_INPUT_RX_PIN 17
 #define UART_INPUT_RX_BUFFER_SIZE 512
-#define UART_INPUT_FRAME_LEN 8
-#define UART_INPUT_MAGIC0 0x46
-#define UART_INPUT_MAGIC_REPORT 0x50
-#define UART_INPUT_MAGIC_TRANSPORT 0x54
-#define UART_INPUT_MAGIC_BATTERY 0x42
+#define UART_INPUT_FRAME_LEN FIGHTPAD_UART_FRAME_LEN
+#define UART_INPUT_MAGIC0 FIGHTPAD_UART_MAGIC
+#define UART_INPUT_MAGIC_REPORT FIGHTPAD_UART_TYPE_INPUT_REPORT
+#define UART_INPUT_MAGIC_TRANSPORT FIGHTPAD_UART_TYPE_TRANSPORT
+#define UART_INPUT_MAGIC_BATTERY FIGHTPAD_UART_TYPE_BATTERY
 #define UART_INPUT_STALE_MS 250
 #define UART_DONE_SIGNAL_TEXT "C6_DONE\n"
 #define UART_DONE_SIGNAL_REPEAT 20
 #define UART_DONE_SIGNAL_INTERVAL_MS 100
+#define UART_TX_COMPLETE_TIMEOUT_MS 100
+#define PROFILE_SYNC_WINDOW_MS 500
+#define PROFILE_RESTART_DELAY_MS 50
 
-#define UART_INPUT_MAGIC_FW_INFO 0x49   /* 'I' */
-#define UART_MAGIC_BLE_STATUS 0x53      /* 'S' — BLE connection status */
+#define UART_INPUT_MAGIC_FW_INFO FIGHTPAD_UART_TYPE_FW_INFO
 #define BLE_STATUS_DISCONNECTED 0x00    /* 未连接 */
 #define BLE_STATUS_CONNECTING   0x01    /* 连接中 */
 #define BLE_STATUS_CONNECTED    0x02    /* 已连接 */
@@ -78,9 +86,10 @@
 #define FW_INFO_SEQ_MASK     0x3F
 
 #define PAIR_BUTTON_GPIO GPIO_NUM_13
+#define PAIR_BUTTON_ACTIVE_LEVEL 0
 #define PAIR_BUTTON_POLL_MS 10
 #define PAIR_BUTTON_DEBOUNCE_MS 30
-#define PAIRING_WINDOW_MS 60000
+#define PAIRING_WINDOW_MS 30000
 #define BRIDGE_FLASH_DIAGNOSTIC_BOOT_PAIRING 0
 #define BRIDGE_FLASH_DIAGNOSTIC_IGNORE_TRANSPORT_WHILE_WINDOW 0
 #define PAIRING_DIAGNOSTIC_DISABLE_ADV 0
@@ -111,6 +120,10 @@ static TaskHandle_t s_report_task;
 static TaskHandle_t s_uart_task;
 static TaskHandle_t s_done_signal_task;
 static TaskHandle_t s_pair_button_task;
+static const ble_profile_definition_t *s_profile_definition;
+static fightpad_ble_profile_t s_active_profile = FIGHTPAD_BLE_PROFILE_GENERIC;
+static ble_profile_persisted_state_t s_profile_state;
+static bool s_profile_runtime;
 static uint8_t s_own_addr_type;
 static bool s_addr_ready;
 static bool s_addr_logged;
@@ -125,12 +138,12 @@ static TickType_t s_pairing_window_deadline;
 static bool s_have_uart_report;
 static uint8_t s_battery_level = 100;
 static bool s_battery_usb_power_present;
-static int s_pair_button_idle_level = -1;
 static uint8_t s_ble_status = 0xFF;  /* deliberately invalid init value — forces first send */
 static TickType_t s_last_real_input_tick;
 static uint32_t s_previous_input_mask;
 static bool s_link_connected;
 static bool s_hid_connected;
+static bool s_security_ready;
 static bool s_terminate_requested;
 static bool s_pairing_status_requested;
 static uint32_t s_directed_request_seq;
@@ -141,18 +154,20 @@ static portMUX_TYPE s_report_lock = portMUX_INITIALIZER_UNLOCKED;
 static portMUX_TYPE s_transport_lock = portMUX_INITIALIZER_UNLOCKED;
 static portMUX_TYPE s_pairing_lock = portMUX_INITIALIZER_UNLOCKED;
 static portMUX_TYPE s_ble_state_lock = portMUX_INITIALIZER_UNLOCKED;
+static portMUX_TYPE s_profile_lock = portMUX_INITIALIZER_UNLOCKED;
 
 typedef enum {
     ADV_MODE_OFF = 0,
     ADV_MODE_FAST,
-    ADV_MODE_SLOW,
+    ADV_MODE_BONDED_FAST,
+    ADV_MODE_BONDED_SLOW,
     ADV_MODE_DIRECTED_HIGH,
-    ADV_MODE_DIRECTED_LOW,
 } adv_mode_t;
 
 typedef struct {
     bool link_connected;
     bool hid_connected;
+    bool security_ready;
     bool hid_started;
     bool terminate_requested;
     uint16_t conn_handle;
@@ -166,17 +181,9 @@ static adv_mode_t s_adv_mode = ADV_MODE_OFF;
 static uint32_t s_directed_handled_seq;
 static TickType_t s_adv_retry_after_tick;
 
-static const uint8_t neutral_report[HID_GAMEPAD_REPORT_LEN] = {
-    0x00, 0x00,     // buttons 1-16 released
-    HID_NEUTRAL_HAT,// hat switch neutral/null, high nibble padding
-    0x00, 0x00,     // X/Y centered
-};
-
-static uint8_t s_current_report[HID_GAMEPAD_REPORT_LEN] = {
-    0x00, 0x00,
-    HID_NEUTRAL_HAT,
-    0x00, 0x00,
-};
+static uint8_t s_neutral_report[BLE_PROFILE_MAX_REPORT_LEN];
+static uint8_t s_current_report[BLE_PROFILE_MAX_REPORT_LEN];
+static size_t s_active_report_len;
 
 /* ble_gap may reuse advertising fields during controller connection reattempts,
  * so referenced data must have static lifetime. */
@@ -187,72 +194,16 @@ typedef struct {
     uint8_t pos;
 } uart_frame_parser_t;
 
-static const uint8_t gamepad_report_map[] = {
-    0x05, 0x01,                    // Usage Page (Generic Desktop)
-    0x09, 0x05,                    // Usage (Game Pad)
-    0xA1, 0x01,                    // Collection (Application)
-    0x85, HID_REPORT_ID_GAMEPAD,   //   Report ID
+static esp_hid_raw_report_map_t s_ble_report_map;
+static esp_hid_device_config_t s_hid_config;
 
-    0x05, 0x09,                    //   Usage Page (Button)
-    0x19, 0x01,                    //   Usage Minimum (Button 1)
-    0x29, 0x10,                    //   Usage Maximum (Button 16)
-    0x15, 0x00,                    //   Logical Minimum (0)
-    0x25, 0x01,                    //   Logical Maximum (1)
-    0x75, 0x01,                    //   Report Size (1)
-    0x95, 0x10,                    //   Report Count (16)
-    0x81, 0x02,                    //   Input (Data,Var,Abs)
-
-    0x05, 0x01,                    //   Usage Page (Generic Desktop)
-    0x09, 0x39,                    //   Usage (Hat Switch)
-    0x15, 0x00,                    //   Logical Minimum (0)
-    0x25, 0x07,                    //   Logical Maximum (7)
-    0x35, 0x00,                    //   Physical Minimum (0)
-    0x46, 0x3B, 0x01,              //   Physical Maximum (315)
-    0x65, 0x14,                    //   Unit (English Rotation, degrees)
-    0x75, 0x04,                    //   Report Size (4)
-    0x95, 0x01,                    //   Report Count (1)
-    0x81, 0x42,                    //   Input (Data,Var,Abs,Null State)
-    0x65, 0x00,                    //   Unit (None)
-
-    0x75, 0x04,                    //   Report Size (4)
-    0x95, 0x01,                    //   Report Count (1)
-    0x81, 0x03,                    //   Input (Const,Var,Abs)
-
-    0x09, 0x30,                    //   Usage (X)
-    0x09, 0x31,                    //   Usage (Y)
-    0x15, 0x81,                    //   Logical Minimum (-127)
-    0x25, 0x7F,                    //   Logical Maximum (127)
-    0x75, 0x08,                    //   Report Size (8)
-    0x95, 0x02,                    //   Report Count (2)
-    0x81, 0x02,                    //   Input (Data,Var,Abs)
-
-    0xC0                           // End Collection
-};
-
-static esp_hid_raw_report_map_t ble_report_maps[] = {
-    {
-        .data = gamepad_report_map,
-        .len = sizeof(gamepad_report_map),
-    },
-};
-
-static esp_hid_device_config_t hid_config = {
-    .vendor_id = 0x1209,
-    .product_id = 0x2040,
-    .version = 0x0001,
-    .device_name = DEVICE_NAME,
-    .manufacturer_name = "Fightpad Bringup",
-    .serial_number = "ESP32C6-BLE-HID-TEST",
-    .report_maps = ble_report_maps,
-    .report_maps_len = 1,
-};
-
-static int start_advertising(bool fast);
+static int start_advertising(bool fast, const ble_addr_t *allowed_peer);
 static int start_directed_advertising(const ble_addr_t *peer_addr, bool high_duty);
 static void manage_advertising(TickType_t now, bool pairing_active);
 static void set_transport_bt_enabled(bool enabled);
 static void send_ble_status_frame(uint8_t status);
 static void trigger_pairing_mode(void);
+static void restore_latest_bonded_peer(void);
 
 static void open_pairing_window(bool show_pairing_status)
 {
@@ -312,6 +263,7 @@ static ble_state_snapshot_t copy_ble_state(void)
     taskENTER_CRITICAL(&s_ble_state_lock);
     state.link_connected = s_link_connected;
     state.hid_connected = s_hid_connected;
+    state.security_ready = s_security_ready;
     state.hid_started = s_hid_started;
     state.terminate_requested = s_terminate_requested;
     state.conn_handle = s_conn_handle;
@@ -394,6 +346,22 @@ static bool peer_identity_addr_valid(const ble_addr_t *addr)
     return valid_type && memcmp(addr->val, zero_addr, sizeof(zero_addr)) != 0;
 }
 
+static ble_addr_t peer_controller_addr(const ble_addr_t *identity_addr)
+{
+    ble_addr_t controller_addr = *identity_addr;
+
+    /* The bond store and connection descriptor can expose identity address
+     * types (PUBLIC_ID / RANDOM_ID). Legacy advertising and controller white
+     * list HCI commands require the corresponding over-the-air base type. */
+    if (controller_addr.type == BLE_ADDR_PUBLIC_ID) {
+        controller_addr.type = BLE_ADDR_PUBLIC;
+    } else if (controller_addr.type == BLE_ADDR_RANDOM_ID) {
+        controller_addr.type = BLE_ADDR_RANDOM;
+    }
+
+    return controller_addr;
+}
+
 static void note_real_input(uint32_t input_mask)
 {
     TickType_t now = xTaskGetTickCount();
@@ -427,10 +395,10 @@ static void update_ble_status_output(void)
                               ble_gap_adv_active();
     uint8_t status;
 
-    if (state.hid_connected) {
-        status = BLE_STATUS_CONNECTED;
-    } else if (pairing_status_active()) {
+    if (pairing_status_active()) {
         status = BLE_STATUS_PAIRING;
+    } else if (state.hid_connected && state.security_ready) {
+        status = BLE_STATUS_CONNECTED;
     } else if (connection_active || high_duty_directed) {
         status = BLE_STATUS_CONNECTING;
     } else {
@@ -440,67 +408,49 @@ static void update_ble_status_output(void)
     send_ble_status_frame(status);
 }
 
-static uint8_t hat_from_dpad(uint8_t dpad)
+static esp_err_t configure_active_profile(fightpad_ble_profile_t profile)
 {
-    bool up = (dpad & UART_DPAD_UP) != 0;
-    bool down = (dpad & UART_DPAD_DOWN) != 0;
-    bool left = (dpad & UART_DPAD_LEFT) != 0;
-    bool right = (dpad & UART_DPAD_RIGHT) != 0;
-
-    if (up && down) {
-        up = false;
-        down = false;
-    }
-    if (left && right) {
-        left = false;
-        right = false;
+    s_profile_definition = ble_profile_get_definition(profile);
+    s_active_profile = s_profile_definition->profile;
+    if (!ble_profile_neutral_report(s_active_profile,
+                                    s_neutral_report,
+                                    sizeof(s_neutral_report),
+                                    &s_active_report_len)) {
+        return ESP_ERR_INVALID_STATE;
     }
 
-    if (up && right) {
-        return 1;
-    }
-    if (down && right) {
-        return 3;
-    }
-    if (down && left) {
-        return 5;
-    }
-    if (up && left) {
-        return 7;
-    }
-    if (up) {
-        return 0;
-    }
-    if (right) {
-        return 2;
-    }
-    if (down) {
-        return 4;
-    }
-    if (left) {
-        return 6;
-    }
+    memcpy(s_current_report, s_neutral_report, s_active_report_len);
+    s_ble_report_map.data = s_profile_definition->report_map;
+    s_ble_report_map.len = s_profile_definition->report_map_len;
+    s_hid_config = (esp_hid_device_config_t) {
+        .vendor_id = s_profile_definition->vendor_id,
+        .product_id = s_profile_definition->product_id,
+        .version = s_profile_definition->version,
+        .device_name = s_profile_definition->device_name,
+        .manufacturer_name = s_profile_definition->manufacturer_name,
+        .serial_number = s_profile_definition->serial_number,
+        .report_maps = &s_ble_report_map,
+        .report_maps_len = 1,
+    };
 
-    return HID_NEUTRAL_HAT;
+    ESP_LOGI(TAG,
+             "active BLE Profile=%u (%s), report id=%u len=%u map=%u max_rpts=%u",
+             (unsigned)s_active_profile,
+             s_profile_definition->profile_label,
+             (unsigned)s_profile_definition->input_report_id,
+             (unsigned)s_profile_definition->input_report_len,
+             (unsigned)s_profile_definition->report_map_len,
+             (unsigned)CONFIG_BT_NIMBLE_SVC_HID_MAX_RPTS);
+    return ESP_OK;
 }
 
-static void compose_hid_report(uint16_t buttons, uint8_t dpad, int8_t x, int8_t y,
-                               uint8_t report[HID_GAMEPAD_REPORT_LEN])
-{
-    report[0] = buttons & 0xFF;
-    report[1] = (buttons >> 8) & 0xFF;
-    report[2] = hat_from_dpad(dpad) & 0x0F;
-    report[3] = (uint8_t)x;
-    report[4] = (uint8_t)y;
-}
-
-static bool set_current_report(const uint8_t report[HID_GAMEPAD_REPORT_LEN])
+static bool set_current_report(const uint8_t *report)
 {
     bool changed;
 
     taskENTER_CRITICAL(&s_report_lock);
-    changed = memcmp(s_current_report, report, HID_GAMEPAD_REPORT_LEN) != 0;
-    memcpy(s_current_report, report, HID_GAMEPAD_REPORT_LEN);
+    changed = memcmp(s_current_report, report, s_active_report_len) != 0;
+    memcpy(s_current_report, report, s_active_report_len);
     s_last_uart_tick = xTaskGetTickCount();
     s_have_uart_report = true;
     taskEXIT_CRITICAL(&s_report_lock);
@@ -544,9 +494,9 @@ static bool force_gameplay_drain(bool valid_fp_received)
     previous = s_gameplay_gate;
     gameplay_gate_force_drain(&s_gameplay_gate);
     current = s_gameplay_gate;
-    report_changed = memcmp(s_current_report, neutral_report,
-                            HID_GAMEPAD_REPORT_LEN) != 0;
-    memcpy(s_current_report, neutral_report, HID_GAMEPAD_REPORT_LEN);
+    report_changed = memcmp(s_current_report, s_neutral_report,
+                            s_active_report_len) != 0;
+    memcpy(s_current_report, s_neutral_report, s_active_report_len);
     s_previous_input_mask = 0;
     if (valid_fp_received) {
         s_last_uart_tick = xTaskGetTickCount();
@@ -587,9 +537,9 @@ static gameplay_gate_result_t process_valid_fp_gate(bool gameplay_locked,
     s_have_uart_report = true;
 
     if (result.action == GAMEPLAY_GATE_SUPPRESS) {
-        result.report_changed = memcmp(s_current_report, neutral_report,
-                                       HID_GAMEPAD_REPORT_LEN) != 0;
-        memcpy(s_current_report, neutral_report, HID_GAMEPAD_REPORT_LEN);
+        result.report_changed = memcmp(s_current_report, s_neutral_report,
+                                       s_active_report_len) != 0;
+        memcpy(s_current_report, s_neutral_report, s_active_report_len);
         s_previous_input_mask = 0;
     }
     taskEXIT_CRITICAL(&s_report_lock);
@@ -598,10 +548,10 @@ static gameplay_gate_result_t process_valid_fp_gate(bool gameplay_locked,
     return result;
 }
 
-static void copy_current_report(uint8_t report[HID_GAMEPAD_REPORT_LEN])
+static void copy_current_report(uint8_t *report)
 {
     taskENTER_CRITICAL(&s_report_lock);
-    memcpy(report, s_current_report, HID_GAMEPAD_REPORT_LEN);
+    memcpy(report, s_current_report, s_active_report_len);
     taskEXIT_CRITICAL(&s_report_lock);
 }
 
@@ -642,7 +592,7 @@ static bool neutralize_stale_uart_report(void)
         previous = s_gameplay_gate;
         gameplay_gate_force_drain(&s_gameplay_gate);
         current = s_gameplay_gate;
-        memcpy(s_current_report, neutral_report, HID_GAMEPAD_REPORT_LEN);
+        memcpy(s_current_report, s_neutral_report, s_active_report_len);
         s_have_uart_report = false;
         s_previous_input_mask = 0;
     }
@@ -702,8 +652,18 @@ static void trigger_pairing_mode(void)
     ESP_LOGI(TAG, "pair button pressed: opening/restarting %d ms pairing window",
              PAIRING_WINDOW_MS);
     open_pairing_window(true);
+    /* Publish FS 03 before link teardown so an existing HID connection cannot
+     * hide the pairing page on the RP2350 display. */
+    send_ble_status_frame(BLE_STATUS_PAIRING);
 
     /* GAP disconnect remains the single authority for the link handle. */
+    ble_state_snapshot_t state = copy_ble_state();
+    if (ble_state_connection_active(&state)) {
+        ESP_LOGI(TAG, "pairing flow: existing BLE link disconnect requested handle=%u",
+                 state.conn_handle);
+    } else {
+        ESP_LOGI(TAG, "pairing flow: no active BLE link; fast advertising requested");
+    }
     request_link_termination();
 
     /* Do NOT call ble_store_clear() here. The phone may still have the
@@ -720,13 +680,9 @@ static void pair_button_task(void *arg)
     bool last_raw_pressed = false;
     TickType_t last_change_tick = xTaskGetTickCount();
 
-    if (s_pair_button_idle_level < 0) {
-        s_pair_button_idle_level = gpio_get_level(PAIR_BUTTON_GPIO);
-        ESP_LOGI(TAG, "pair button idle level=%d", s_pair_button_idle_level);
-    }
-
     while (1) {
-        bool raw_pressed = gpio_get_level(PAIR_BUTTON_GPIO) != s_pair_button_idle_level;
+        bool raw_pressed =
+            gpio_get_level(PAIR_BUTTON_GPIO) == PAIR_BUTTON_ACTIVE_LEVEL;
         TickType_t now = xTaskGetTickCount();
 
         if (raw_pressed != last_raw_pressed) {
@@ -752,14 +708,14 @@ static void pair_button_task(void *arg)
     }
 }
 
-static esp_err_t send_hid_report(const uint8_t report[HID_GAMEPAD_REPORT_LEN])
+static esp_err_t send_hid_report(const uint8_t *report)
 {
     return esp_hidd_dev_input_set(
         s_hid_dev,
-        HID_REPORT_MAP_INDEX,
-        HID_REPORT_ID_GAMEPAD,
+        BLE_PROFILE_REPORT_MAP_INDEX,
+        s_profile_definition->input_report_id,
         (uint8_t *)report,
-        HID_GAMEPAD_REPORT_LEN
+        s_active_report_len
     );
 }
 
@@ -777,15 +733,25 @@ static void update_hid_battery_level(uint8_t level)
     }
 }
 
-static uint8_t uart_frame_checksum(const uint8_t frame[UART_INPUT_FRAME_LEN])
+static bool write_uart_frame(const uint8_t frame[FIGHTPAD_UART_FRAME_LEN],
+                             const char *label)
 {
-    uint8_t checksum = 0;
-
-    for (uint8_t i = 0; i < UART_INPUT_FRAME_LEN - 1; i++) {
-        checksum ^= frame[i];
+    int written = uart_write_bytes(UART_INPUT_PORT,
+                                   (const char *)frame,
+                                   FIGHTPAD_UART_FRAME_LEN);
+    if (written != FIGHTPAD_UART_FRAME_LEN) {
+        ESP_LOGE(TAG, "%s UART write short: %d/%u", label, written,
+                 (unsigned)FIGHTPAD_UART_FRAME_LEN);
+        return false;
     }
-
-    return checksum;
+    esp_err_t err = uart_wait_tx_done(
+        UART_INPUT_PORT, pdMS_TO_TICKS(UART_TX_COMPLETE_TIMEOUT_MS));
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "%s UART TX completion failed: %s",
+                 label, esp_err_to_name(err));
+        return false;
+    }
+    return true;
 }
 
 static void send_ble_status_frame(uint8_t status)
@@ -794,14 +760,11 @@ static void send_ble_status_frame(uint8_t status)
         return;  /* no change — skip duplicate */
     }
 
-    uint8_t frame[UART_INPUT_FRAME_LEN];
-    memset(frame, 0, UART_INPUT_FRAME_LEN);
-    frame[0] = UART_INPUT_MAGIC0;
-    frame[1] = UART_MAGIC_BLE_STATUS;
-    frame[2] = status;
-    frame[7] = uart_frame_checksum(frame);
-
-    uart_write_bytes(UART_INPUT_PORT, (const char *)frame, UART_INPUT_FRAME_LEN);
+    uint8_t frame[FIGHTPAD_UART_FRAME_LEN];
+    fightpad_uart_build_ble_status(status, frame);
+    if (!write_uart_frame(frame, "BLE status")) {
+        return;
+    }
     s_ble_status = status;
 
     static const char *names[] = {
@@ -815,12 +778,105 @@ static void send_ble_status_frame(uint8_t status)
              status);
 }
 
+static bool send_profile_ack(fightpad_ble_profile_t profile,
+                             uint8_t sequence,
+                             fightpad_ble_profile_ack_t result)
+{
+    uint8_t frame[FIGHTPAD_UART_FRAME_LEN];
+    fightpad_uart_build_profile_ack(profile, sequence, result, frame);
+    bool sent = write_uart_frame(frame, "Profile ACK");
+    ESP_LOGI(TAG, "Profile ACK seq=%u profile=%u result=%u sent=%u",
+             sequence, (unsigned)profile, (unsigned)result, sent);
+    return sent;
+}
+
+static void handle_profile_mode_frame(
+    const uint8_t frame[FIGHTPAD_UART_FRAME_LEN])
+{
+    fightpad_ble_profile_mode_t mode = {0};
+    fightpad_mode_parse_result_t parse_result =
+        fightpad_uart_parse_profile_mode(frame, &mode);
+    if (parse_result == FIGHTPAD_MODE_PARSE_BAD_FRAME) {
+        return;
+    }
+
+    if ((mode.flags & ~BLE_PROFILE_FLAG_KNOWN_MASK) != 0u) {
+        ESP_LOGW(TAG, "Profile Mode seq=%u has unknown flags 0x%02x",
+                 mode.sequence,
+                 mode.flags & (uint8_t)~BLE_PROFILE_FLAG_KNOWN_MASK);
+    }
+    if (mode.reserved != 0u) {
+        ESP_LOGW(TAG, "Profile Mode seq=%u reserved=0x%02x ignored",
+                 mode.sequence, mode.reserved);
+    }
+
+    ble_profile_persisted_state_t current;
+    bool runtime;
+    taskENTER_CRITICAL(&s_profile_lock);
+    current = s_profile_state;
+    runtime = s_profile_runtime;
+    taskEXIT_CRITICAL(&s_profile_lock);
+
+    fightpad_ble_profile_t decision_active = runtime
+        ? s_active_profile
+        : (fightpad_ble_profile_t)current.profile;
+    ble_profile_mode_decision_t decision;
+    ble_profile_decide_mode(&current,
+                            decision_active,
+                            runtime ? BLE_PROFILE_PHASE_RUNTIME
+                                    : BLE_PROFILE_PHASE_BOOT,
+                            parse_result,
+                            &mode,
+                            &decision);
+    if (!decision.respond) {
+        return;
+    }
+
+    if (decision.persist) {
+        esp_err_t err = ble_profile_store_save(&decision.next_state);
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "Profile state save failed: %s",
+                     esp_err_to_name(err));
+            (void)send_profile_ack(decision_active,
+                                   mode.sequence,
+                                   BLE_PROFILE_ACK_INTERNAL_ERROR);
+            return;
+        }
+        taskENTER_CRITICAL(&s_profile_lock);
+        s_profile_state = decision.next_state;
+        taskEXIT_CRITICAL(&s_profile_lock);
+    }
+
+    ESP_LOGI(TAG,
+             "Profile Mode seq=%u requested=%u accepted=%u phase=%s restart=%u",
+             mode.sequence,
+             mode.requested_profile,
+             (unsigned)decision.accepted_profile,
+             runtime ? "runtime" : "boot",
+             decision.restart);
+    if (!send_profile_ack(decision.accepted_profile,
+                          mode.sequence,
+                          decision.ack_result)) {
+        return;
+    }
+
+    if (decision.restart) {
+        ESP_LOGI(TAG, "Profile change persisted; restarting C6 in %d ms",
+                 PROFILE_RESTART_DELAY_MS);
+        vTaskDelay(pdMS_TO_TICKS(PROFILE_RESTART_DELAY_MS));
+        esp_restart();
+    }
+}
+
 static void handle_uart_frame(const uint8_t frame[UART_INPUT_FRAME_LEN])
 {
-    uint8_t expected_checksum = uart_frame_checksum(frame);
-    if (frame[UART_INPUT_FRAME_LEN - 1] != expected_checksum) {
-        ESP_LOGD(TAG, "UART frame checksum mismatch got=0x%02x expected=0x%02x",
-                 frame[UART_INPUT_FRAME_LEN - 1], expected_checksum);
+    if (!fightpad_uart_frame_checksum_valid(frame)) {
+        ESP_LOGD(TAG, "UART frame checksum mismatch type=0x%02x", frame[1]);
+        return;
+    }
+
+    if (frame[1] == FIGHTPAD_UART_TYPE_PROFILE_MODE) {
+        handle_profile_mode_frame(frame);
         return;
     }
 
@@ -862,7 +918,7 @@ static void handle_uart_frame(const uint8_t frame[UART_INPUT_FRAME_LEN])
     int8_t x = (int8_t)frame[5];
     int8_t y = (int8_t)frame[6];
     bool payload_neutral = buttons == 0 && dpad == 0 && x == 0 && y == 0;
-    uint8_t report[HID_GAMEPAD_REPORT_LEN];
+    uint8_t report[BLE_PROFILE_MAX_REPORT_LEN];
     gameplay_gate_result_t gate_result =
         process_valid_fp_gate(gameplay_locked, payload_neutral);
 
@@ -878,7 +934,24 @@ static void handle_uart_frame(const uint8_t frame[UART_INPUT_FRAME_LEN])
         return;
     }
 
-    compose_hid_report(buttons, dpad, x, y, report);
+    normalized_fightpad_state_t input_state = {
+        .buttons = buttons,
+        .dpad = dpad,
+        .x = x,
+        .y = y,
+    };
+    size_t encoded_len = 0;
+    if (!ble_profile_encode_report(s_active_profile,
+                                   &input_state,
+                                   report,
+                                   sizeof(report),
+                                   &encoded_len) ||
+        encoded_len != s_active_report_len) {
+        ESP_LOGE(TAG, "Profile report encode failed profile=%u",
+                 (unsigned)s_active_profile);
+        force_gameplay_drain(true);
+        return;
+    }
     bool changed = set_current_report(report);
 
     /* Neutral heartbeat frames still release HID state, but only real input
@@ -902,9 +975,7 @@ static void parse_uart_byte(uart_frame_parser_t *parser, uint8_t value)
     }
 
     if (parser->pos == 1) {
-        if (value == UART_INPUT_MAGIC_REPORT ||
-            value == UART_INPUT_MAGIC_TRANSPORT ||
-            value == UART_INPUT_MAGIC_BATTERY) {
+        if (fightpad_uart_input_type_allowed(value)) {
             parser->data[parser->pos++] = value;
         } else if (value == UART_INPUT_MAGIC0) {
             parser->data[0] = value;
@@ -1060,16 +1131,16 @@ static void send_fw_info_frames(const char *payload, int len)
         memcpy(&frame[3], &payload[offset], copy_len);
 
         /* XOR checksum over bytes 0-6 */
-        frame[7] = uart_frame_checksum(frame);
+        frame[7] = fightpad_uart_checksum(frame);
 
-        uart_write_bytes(UART_INPUT_PORT, (const char *)frame, UART_INPUT_FRAME_LEN);
+        (void)write_uart_frame(frame, "firmware info");
     }
 }
 
 static void report_task(void *arg)
 {
-    uint8_t report[HID_GAMEPAD_REPORT_LEN];
-    uint8_t last_sent[HID_GAMEPAD_REPORT_LEN] = {0};
+    uint8_t report[BLE_PROFILE_MAX_REPORT_LEN];
+    uint8_t last_sent[BLE_PROFILE_MAX_REPORT_LEN] = {0};
     bool have_last_sent = false;
     TickType_t last_sent_tick = 0;
     TickType_t report_delay_ticks = pdMS_TO_TICKS(HID_REPORT_INTERVAL_MS);
@@ -1091,19 +1162,20 @@ static void report_task(void *arg)
         bool report_link_ready = s_hid_dev != NULL &&
                                  state.link_connected &&
                                  state.hid_connected &&
+                                 state.security_ready &&
                                  state.conn_handle != BLE_HS_CONN_HANDLE_NONE;
 
         if (report_link_ready) {
             TickType_t now = xTaskGetTickCount();
             bool changed = !have_last_sent ||
-                           memcmp(report, last_sent, HID_GAMEPAD_REPORT_LEN) != 0;
+                           memcmp(report, last_sent, s_active_report_len) != 0;
             bool keepalive = have_last_sent &&
                              (now - last_sent_tick) >= pdMS_TO_TICKS(HID_REPORT_KEEPALIVE_MS);
 
             if (changed || keepalive) {
                 esp_err_t err = send_hid_report(report);
                 if (err == ESP_OK) {
-                    memcpy(last_sent, report, HID_GAMEPAD_REPORT_LEN);
+                    memcpy(last_sent, report, s_active_report_len);
                     have_last_sent = true;
                     last_sent_tick = now;
                 } else {
@@ -1141,27 +1213,50 @@ static int gap_event(struct ble_gap_event *event, void *arg)
             taskENTER_CRITICAL(&s_ble_state_lock);
             s_conn_handle = event->connect.conn_handle;
             s_link_connected = true;
+            s_security_ready = false;
             taskEXIT_CRITICAL(&s_ble_state_lock);
             close_pairing_window();
 
             /* Use the stable identity address, never a rotating OTA RPA. */
-            if (ble_gap_conn_find(event->connect.conn_handle, &desc) == 0 &&
-                desc.sec_state.bonded &&
-                peer_identity_addr_valid(&desc.peer_id_addr)) {
-                taskENTER_CRITICAL(&s_ble_state_lock);
-                s_peer_addr = desc.peer_id_addr;
-                s_have_peer_addr = true;
-                taskEXIT_CRITICAL(&s_ble_state_lock);
+            if (ble_gap_conn_find(event->connect.conn_handle, &desc) == 0) {
+                ESP_LOGI(TAG,
+                         "BLE link security encrypted=%u authenticated=%u bonded=%u peer_type=%u id_type=%u",
+                         desc.sec_state.encrypted,
+                         desc.sec_state.authenticated,
+                         desc.sec_state.bonded,
+                         desc.peer_ota_addr.type,
+                         desc.peer_id_addr.type);
+                if (desc.sec_state.bonded &&
+                    peer_identity_addr_valid(&desc.peer_id_addr)) {
+                    taskENTER_CRITICAL(&s_ble_state_lock);
+                    s_peer_addr = desc.peer_id_addr;
+                    s_have_peer_addr = true;
+                    taskEXIT_CRITICAL(&s_ble_state_lock);
+                }
             }
 
             if (!transport_bt_enabled()) {
                 request_link_termination();
+            } else {
+                /* macOS does not create a BLE HID input device until the
+                 * link is encrypted.  Start SMP explicitly instead of
+                 * depending on a later encrypted characteristic access. */
+                rc = ble_gap_security_initiate(event->connect.conn_handle);
+                if (rc == 0) {
+                    ESP_LOGI(TAG, "BLE security procedure started");
+                } else if (rc == BLE_HS_EALREADY) {
+                    ESP_LOGI(TAG, "BLE security procedure already in progress");
+                } else {
+                    ESP_LOGE(TAG, "BLE security procedure start failed rc=%d", rc);
+                    request_link_termination();
+                }
             }
         } else {
             taskENTER_CRITICAL(&s_ble_state_lock);
             s_conn_handle = BLE_HS_CONN_HANDLE_NONE;
             s_link_connected = false;
             s_hid_connected = false;
+            s_security_ready = false;
             taskEXIT_CRITICAL(&s_ble_state_lock);
         }
         return 0;
@@ -1179,14 +1274,38 @@ static int gap_event(struct ble_gap_event *event, void *arg)
         s_conn_handle = BLE_HS_CONN_HANDLE_NONE;
         s_link_connected = false;
         s_hid_connected = false;
+        s_security_ready = false;
         s_terminate_requested = false;
+        taskEXIT_CRITICAL(&s_ble_state_lock);
+
+        /* Security state and bond persistence can complete after CONNECT.
+         * Re-read the store at DISCONNECT so the very first bonded link is not
+         * stranded merely because no earlier callback captured its identity. */
+        if (!copy_ble_state().have_peer_addr) {
+            restore_latest_bonded_peer();
+        }
+
+        bool reconnect_queued = false;
+        uint32_t reconnect_seq = 0;
+        uint8_t reconnect_peer_type = 0;
+        taskENTER_CRITICAL(&s_ble_state_lock);
         if (s_have_peer_addr) {
-            /* A peripheral cannot observe when the PC radio comes back on.
-             * Queue one directed burst now, then let the idle state fall back
-             * to low-duty directed advertising for the bonded peer. */
+            /* Queue a short directed attempt. manage_advertising() follows it
+             * with whitelist-filtered undirected advertising, which Windows
+             * reconnects to more reliably while preserving binding isolation. */
             ++s_directed_request_seq;
+            reconnect_queued = true;
+            reconnect_seq = s_directed_request_seq;
+            reconnect_peer_type = s_peer_addr.type;
         }
         taskEXIT_CRITICAL(&s_ble_state_lock);
+        if (reconnect_queued) {
+            ESP_LOGI(TAG, "reconnect queued seq=%lu peer_type=%u",
+                     (unsigned long)reconnect_seq,
+                     reconnect_peer_type);
+        } else {
+            ESP_LOGW(TAG, "disconnect left no bonded peer; reconnect advertising remains off");
+        }
         reset_real_input_state(xTaskGetTickCount());
         return 0;
 
@@ -1202,15 +1321,48 @@ static int gap_event(struct ble_gap_event *event, void *arg)
 
     case BLE_GAP_EVENT_ENC_CHANGE:
         ESP_LOGI(TAG, "BLE encryption changed status=%d", event->enc_change.status);
-        if (event->enc_change.status == 0 &&
-            ble_gap_conn_find(event->enc_change.conn_handle, &desc) == 0 &&
-            desc.sec_state.bonded &&
-            peer_identity_addr_valid(&desc.peer_id_addr)) {
+        if (event->enc_change.status != 0) {
             taskENTER_CRITICAL(&s_ble_state_lock);
+            s_security_ready = false;
+            taskEXIT_CRITICAL(&s_ble_state_lock);
+            ESP_LOGW(TAG, "BLE security failed; disconnecting insecure link");
+            request_link_termination();
+            return 0;
+        }
+
+        rc = ble_gap_conn_find(event->enc_change.conn_handle, &desc);
+        if (rc != 0) {
+            taskENTER_CRITICAL(&s_ble_state_lock);
+            s_security_ready = false;
+            taskEXIT_CRITICAL(&s_ble_state_lock);
+            ESP_LOGE(TAG, "BLE security state lookup failed rc=%d", rc);
+            request_link_termination();
+            return 0;
+        }
+
+        ESP_LOGI(TAG,
+                 "BLE security state encrypted=%u authenticated=%u bonded=%u id_type=%u",
+                 desc.sec_state.encrypted,
+                 desc.sec_state.authenticated,
+                 desc.sec_state.bonded,
+                 desc.peer_id_addr.type);
+        if (!desc.sec_state.encrypted || !desc.sec_state.bonded) {
+            taskENTER_CRITICAL(&s_ble_state_lock);
+            s_security_ready = false;
+            taskEXIT_CRITICAL(&s_ble_state_lock);
+            ESP_LOGW(TAG, "BLE security incomplete; disconnecting unbonded link");
+            request_link_termination();
+            return 0;
+        }
+
+        taskENTER_CRITICAL(&s_ble_state_lock);
+        s_security_ready = true;
+        if (peer_identity_addr_valid(&desc.peer_id_addr)) {
             s_peer_addr = desc.peer_id_addr;
             s_have_peer_addr = true;
-            taskEXIT_CRITICAL(&s_ble_state_lock);
         }
+        taskEXIT_CRITICAL(&s_ble_state_lock);
+        ESP_LOGI(TAG, "BLE secure bonded link ready");
         return 0;
 
     case BLE_GAP_EVENT_IDENTITY_RESOLVED:
@@ -1325,7 +1477,8 @@ static int start_directed_advertising(const ble_addr_t *peer_addr, bool high_dut
         adv_params.itvl_max = BLE_GAP_ADV_ITVL_MS(ADV_IDLE_ITVL_MS);
     }
 
-    int rc = ble_gap_adv_start(s_own_addr_type, peer_addr,
+    ble_addr_t controller_peer = peer_controller_addr(peer_addr);
+    int rc = ble_gap_adv_start(s_own_addr_type, &controller_peer,
                                high_duty ? DIRECTED_ADV_TIMEOUT_MS : BLE_HS_FOREVER,
                                &adv_params, gap_event, NULL);
     if (rc != 0) {
@@ -1341,7 +1494,7 @@ static int start_directed_advertising(const ble_addr_t *peer_addr, bool high_dut
     return 0;
 }
 
-static int start_advertising(bool fast)
+static int start_advertising(bool fast, const ble_addr_t *allowed_peer)
 {
 #if PAIRING_DIAGNOSTIC_DISABLE_ADV
     ESP_LOGI(TAG, "diagnostic: advertising disabled in firmware");
@@ -1360,8 +1513,8 @@ static int start_advertising(bool fast)
     fields.flags = BLE_HS_ADV_F_DISC_GEN | BLE_HS_ADV_F_BREDR_UNSUP;
     fields.appearance = ESP_HID_APPEARANCE_GAMEPAD;
     fields.appearance_is_present = 1;
-    fields.name = (uint8_t *)DEVICE_NAME;
-    fields.name_len = strlen(DEVICE_NAME);
+    fields.name = (uint8_t *)s_profile_definition->device_name;
+    fields.name_len = strlen(s_profile_definition->device_name);
     fields.name_is_complete = 1;
     fields.uuids16 = &s_hid_service_uuid;
     fields.num_uuids16 = 1;
@@ -1369,12 +1522,27 @@ static int start_advertising(bool fast)
 
     int rc = ble_gap_adv_set_fields(&fields);
     if (rc != 0) {
+        ESP_LOGE(TAG,
+                 "advertising fields rejected rc=%d name=%s name_len=%u",
+                 rc,
+                 s_profile_definition->device_name,
+                 (unsigned)fields.name_len);
         return rc;
     }
 
     struct ble_gap_adv_params adv_params = {0};
     adv_params.conn_mode = BLE_GAP_CONN_MODE_UND;
     adv_params.disc_mode = BLE_GAP_DISC_MODE_GEN;
+    if (allowed_peer != NULL) {
+        ble_addr_t whitelist_peer = peer_controller_addr(allowed_peer);
+        rc = ble_gap_wl_set(&whitelist_peer, 1);
+        if (rc != 0) {
+            ESP_LOGE(TAG, "bonded peer whitelist setup failed rc=%d type=%u",
+                     rc, whitelist_peer.type);
+            return rc;
+        }
+        adv_params.filter_policy = BLE_HCI_ADV_FILT_CONN;
+    }
     if (fast) {
         adv_params.itvl_min = BLE_GAP_ADV_ITVL_MS(ADV_ACTIVE_ITVL_MIN_MS);
         adv_params.itvl_max = BLE_GAP_ADV_ITVL_MS(ADV_ACTIVE_ITVL_MAX_MS);
@@ -1388,8 +1556,10 @@ static int start_advertising(bool fast)
         return rc;
     }
 
-    ESP_LOGI(TAG, "advertising as %s (%s interval)", DEVICE_NAME,
-             fast ? "fast" : "slow-200ms");
+    ESP_LOGI(TAG, "advertising as %s (%s interval, %s connections)",
+             s_profile_definition->device_name,
+             fast ? "fast" : "slow-200ms",
+             allowed_peer != NULL ? "bonded-peer-only" : "pairing-open");
 
     return 0;
 }
@@ -1408,6 +1578,10 @@ static void manage_advertising(TickType_t now, bool pairing_active)
         } else {
             int rc = ble_gap_terminate(state.conn_handle, BLE_ERR_REM_USER_CONN_TERM);
             if (rc == 0 || rc == BLE_HS_EALREADY || rc == BLE_HS_ENOTCONN) {
+                if (pairing_active) {
+                    ESP_LOGI(TAG, "pairing flow: BLE disconnect command consumed rc=%d",
+                             rc);
+                }
                 clear_link_termination_request();
             } else {
                 ESP_LOGW(TAG, "BLE terminate request failed rc=%d", rc);
@@ -1441,6 +1615,20 @@ static void manage_advertising(TickType_t now, bool pairing_active)
         return;
     }
 
+    /* A normal boot without a bond is intentionally silent.  Only an
+     * explicit GPIO13/Profile-change pairing window authorizes undirected
+     * discoverable advertising for a new host. */
+    if (!pairing_active && !state.have_peer_addr) {
+        if (adv_active) {
+            int rc = ble_gap_adv_stop();
+            if (rc != 0 && rc != BLE_HS_EALREADY) {
+                ESP_LOGW(TAG, "unauthorized advertising stop failed rc=%d", rc);
+            }
+        }
+        s_adv_mode = ADV_MODE_OFF;
+        return;
+    }
+
     bool directed_pending = state.directed_request_seq != s_directed_handled_seq;
     if (directed_pending && (pairing_active || !state.have_peer_addr)) {
         if (!state.have_peer_addr) {
@@ -1450,27 +1638,21 @@ static void manage_advertising(TickType_t now, bool pairing_active)
         directed_pending = false;
     }
 
-    if ((s_adv_mode == ADV_MODE_DIRECTED_HIGH ||
-         s_adv_mode == ADV_MODE_DIRECTED_LOW) && adv_active &&
+    if (s_adv_mode == ADV_MODE_DIRECTED_HIGH && adv_active &&
         !directed_pending && !pairing_active) {
-        TickType_t last_input = last_real_input_tick();
-        bool recent_input =
-            (now - last_input) < pdMS_TO_TICKS(REAL_INPUT_IDLE_MS);
-        if ((s_adv_mode == ADV_MODE_DIRECTED_HIGH) || !recent_input) {
-            return;
-        }
+        return;
     }
 
     TickType_t last_input = last_real_input_tick();
     bool fast = pairing_active ||
                 (now - last_input) < pdMS_TO_TICKS(REAL_INPUT_IDLE_MS);
     adv_mode_t desired_mode;
-    if (directed_pending) {
+    if (pairing_active) {
+        desired_mode = ADV_MODE_FAST;
+    } else if (directed_pending) {
         desired_mode = ADV_MODE_DIRECTED_HIGH;
-    } else if (!fast && state.have_peer_addr) {
-        desired_mode = ADV_MODE_DIRECTED_LOW;
     } else {
-        desired_mode = fast ? ADV_MODE_FAST : ADV_MODE_SLOW;
+        desired_mode = fast ? ADV_MODE_BONDED_FAST : ADV_MODE_BONDED_SLOW;
     }
 
     if (adv_active) {
@@ -1495,27 +1677,27 @@ static void manage_advertising(TickType_t now, bool pairing_active)
     }
 
     int rc;
-    if (desired_mode == ADV_MODE_DIRECTED_HIGH ||
-        desired_mode == ADV_MODE_DIRECTED_LOW) {
-        bool high_duty = desired_mode == ADV_MODE_DIRECTED_HIGH;
-        rc = start_directed_advertising(&state.peer_addr, high_duty);
+    if (desired_mode == ADV_MODE_DIRECTED_HIGH) {
+        rc = start_directed_advertising(&state.peer_addr, true);
         if (rc == 0) {
             s_adv_mode = desired_mode;
-            if (high_duty) {
-                s_directed_handled_seq = state.directed_request_seq;
-            }
+            s_directed_handled_seq = state.directed_request_seq;
             s_adv_retry_after_tick = 0;
             return;
         }
-        ESP_LOGW(TAG, "%s directed advertising start failed rc=%d",
-                 high_duty ? "high-duty" : "low-duty", rc);
-        if (high_duty) {
-            /* Do not strand the controller in an endless retry loop on a stale
-             * peer or permanent parameter error. The next real press can retry. */
-            s_directed_handled_seq = state.directed_request_seq;
-        }
+        ESP_LOGW(TAG, "high-duty directed advertising start failed rc=%d; falling back to bonded advertising",
+                 rc);
+        /* Do not strand the controller in an endless retry loop on a stale
+         * peer or permanent parameter error. The next loop starts the normal
+         * whitelist-filtered reconnect advertisement. */
+        s_directed_handled_seq = state.directed_request_seq;
     } else {
-        rc = start_advertising(desired_mode == ADV_MODE_FAST);
+        bool bonded_only = desired_mode == ADV_MODE_BONDED_FAST ||
+                           desired_mode == ADV_MODE_BONDED_SLOW;
+        bool adv_fast = desired_mode == ADV_MODE_FAST ||
+                        desired_mode == ADV_MODE_BONDED_FAST;
+        rc = start_advertising(adv_fast,
+                               bonded_only ? &state.peer_addr : NULL);
         if (rc == 0) {
             s_adv_mode = desired_mode;
             s_adv_retry_after_tick = 0;
@@ -1574,9 +1756,10 @@ static void hidd_event_callback(void *handler_args, esp_event_base_t base, int32
     case ESP_HIDD_DISCONNECT_EVENT:
         ESP_LOGI(TAG, "HID disconnected reason=%d", param->disconnect.reason);
         taskENTER_CRITICAL(&s_ble_state_lock);
+        /* The HID event is asynchronous and does not carry a connection
+         * handle or peer identity. GAP DISCONNECT remains the sole authority
+         * for clearing the link and queuing reconnect advertising. */
         s_hid_connected = false;
-        s_link_connected = false;
-        s_conn_handle = BLE_HS_CONN_HANDLE_NONE;
         taskEXIT_CRITICAL(&s_ble_state_lock);
         break;
 
@@ -1600,6 +1783,7 @@ static void hidd_event_callback(void *handler_args, esp_event_base_t base, int32
         s_hid_started = false;
         s_hid_connected = false;
         s_link_connected = false;
+        s_security_ready = false;
         s_terminate_requested = false;
         s_conn_handle = BLE_HS_CONN_HANDLE_NONE;
         taskEXIT_CRITICAL(&s_ble_state_lock);
@@ -1685,6 +1869,71 @@ static esp_err_t init_nimble_controller(void)
     return ESP_OK;
 }
 
+static esp_err_t load_profile_state(void)
+{
+    ble_profile_store_load_result_t result;
+    ble_profile_persisted_state_t loaded;
+    esp_err_t err = ble_profile_store_load(&loaded, &result);
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    taskENTER_CRITICAL(&s_profile_lock);
+    s_profile_state = loaded;
+    taskEXIT_CRITICAL(&s_profile_lock);
+    ESP_LOGI(TAG, "Profile state loaded result=%u profile=%u pending=0x%02x",
+             (unsigned)result,
+             loaded.profile,
+             loaded.pending_flags);
+    return ESP_OK;
+}
+
+static esp_err_t apply_profile_boot_pending(void)
+{
+    ble_profile_persisted_state_t current;
+    taskENTER_CRITICAL(&s_profile_lock);
+    current = s_profile_state;
+    taskEXIT_CRITICAL(&s_profile_lock);
+
+    if (current.pending_flags == 0u) {
+        return ESP_OK;
+    }
+
+    if ((current.pending_flags & BLE_PROFILE_PENDING_CLEAR_BONDS) != 0u) {
+        int rc = ble_store_clear();
+        if (rc != 0) {
+            ESP_LOGE(TAG, "Profile bond clear failed rc=%d; pending retained", rc);
+            return ESP_FAIL;
+        }
+        taskENTER_CRITICAL(&s_ble_state_lock);
+        memset(&s_peer_addr, 0, sizeof(s_peer_addr));
+        s_have_peer_addr = false;
+        taskEXIT_CRITICAL(&s_ble_state_lock);
+        ESP_LOGI(TAG, "Profile change cleared old BLE bonds");
+    }
+
+    const bool open_pairing =
+        (current.pending_flags & BLE_PROFILE_PENDING_PAIRING) != 0u;
+    ble_profile_persisted_state_t completed = current;
+    completed.pending_flags = 0u;
+    esp_err_t err = ble_profile_store_save(&completed);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Profile pending completion save failed: %s",
+                 esp_err_to_name(err));
+        return err;
+    }
+
+    taskENTER_CRITICAL(&s_profile_lock);
+    s_profile_state = completed;
+    taskEXIT_CRITICAL(&s_profile_lock);
+    if (open_pairing) {
+        ESP_LOGI(TAG, "Profile change opening %d ms pairing window",
+                 PAIRING_WINDOW_MS);
+        open_pairing_window(true);
+    }
+    return ESP_OK;
+}
+
 void app_main(void)
 {
     ESP_LOGI(TAG, "app_main: start");
@@ -1696,6 +1945,7 @@ void app_main(void)
     }
     ESP_ERROR_CHECK(ret);
     ESP_LOGI(TAG, "app_main: nvs ready");
+    ESP_ERROR_CHECK(load_profile_state());
 
     ret = esp_event_loop_create_default();
     if (ret != ESP_OK && ret != ESP_ERR_INVALID_STATE) {
@@ -1714,10 +1964,8 @@ void app_main(void)
         .intr_type = GPIO_INTR_DISABLE,
     };
     ESP_ERROR_CHECK(gpio_config(&pair_button_config));
-    s_pair_button_idle_level = gpio_get_level(PAIR_BUTTON_GPIO);
-    ESP_LOGI(TAG, "app_main: pair button gpio ready on GPIO%d idle=%d",
-             PAIR_BUTTON_GPIO,
-             s_pair_button_idle_level);
+    ESP_LOGI(TAG, "app_main: pair button ready on GPIO%d active_level=%d",
+             PAIR_BUTTON_GPIO, PAIR_BUTTON_ACTIVE_LEVEL);
 
     reset_real_input_state(xTaskGetTickCount());
     ESP_ERROR_CHECK(init_input_uart());
@@ -1736,12 +1984,24 @@ void app_main(void)
         }
     }
 
+    ESP_LOGI(TAG, "waiting %d ms for boot Profile sync",
+             PROFILE_SYNC_WINDOW_MS);
+    vTaskDelay(pdMS_TO_TICKS(PROFILE_SYNC_WINDOW_MS));
+
+    ble_profile_persisted_state_t boot_profile_state;
+    taskENTER_CRITICAL(&s_profile_lock);
+    boot_profile_state = s_profile_state;
+    taskEXIT_CRITICAL(&s_profile_lock);
+    ESP_ERROR_CHECK(configure_active_profile(
+        (fightpad_ble_profile_t)boot_profile_state.profile));
+
     start_done_signal_task();
     ESP_LOGI(TAG, "app_main: done signal task started");
 
-    ble_svc_gap_device_name_set(DEVICE_NAME);
+    ble_svc_gap_device_name_set(s_profile_definition->device_name);
     configure_security();
-    ESP_LOGI(TAG, "app_main: ble config ready for %s", DEVICE_NAME);
+    ESP_LOGI(TAG, "app_main: ble config ready for %s",
+             s_profile_definition->device_name);
 
 #if BRIDGE_FLASH_DIAGNOSTIC_BOOT_PAIRING
     ESP_LOGI(TAG, "diagnostic: opening boot pairing window for bridge flash verification");
@@ -1757,14 +2017,18 @@ void app_main(void)
 #endif
 
     ESP_ERROR_CHECK(esp_hidd_dev_init(
-        &hid_config,
+        &s_hid_config,
         ESP_HID_TRANSPORT_BLE,
         hidd_event_callback,
         &s_hid_dev
     ));
     ESP_LOGI(TAG, "app_main: hid init requested");
+    taskENTER_CRITICAL(&s_profile_lock);
+    s_profile_runtime = true;
+    taskEXIT_CRITICAL(&s_profile_lock);
 
     ble_store_config_init();
+    ESP_ERROR_CHECK(apply_profile_boot_pending());
     restore_latest_bonded_peer();
     ESP_LOGI(TAG, "app_main: ble store ready");
     ESP_ERROR_CHECK(esp_nimble_enable(host_task));
@@ -1778,14 +2042,13 @@ void app_main(void)
                                          &s_pair_button_task);
     ESP_ERROR_CHECK(task_result == pdPASS ? ESP_OK : ESP_ERR_NO_MEM);
 
-    /* Boot: default transport to BT if RP2350 hasn't set it yet, then open
-     * pairing window so BLE is discoverable + modem sleep has an RF schedule */
+    /* Boot defaults to BT only when RP2350 has not sent Transport yet.  A
+     * normal unbonded boot remains silent until GPIO13 or a Profile change
+     * opens an explicit pairing window. */
     bool mode_seen;
     copy_transport_state(&mode_seen, NULL);
     if (!mode_seen) {
         set_transport_bt_enabled(true);
     }
-    open_pairing_window(false);
-
     ESP_LOGI(TAG, "app_main: pair button task started");
 }
