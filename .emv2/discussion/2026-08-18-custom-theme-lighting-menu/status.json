@@ -1,0 +1,21 @@
+{
+  "discussion_id": "2026-08-18-custom-theme-lighting-menu",
+  "created_at": "2026-08-18",
+  "current_phase": 6,
+  "phases": {
+    "split": "completed",
+    "requirements": "completed",
+    "hardware": "completed",
+    "brainstorm": "completed",
+    "milestones": "completed"
+  },
+  "subsystems": [
+    "web_custom_theme_storage",
+    "lighting_effect_menu",
+    "gp22_button_leds",
+    "gp40_ambient_leds",
+    "persistence_and_fallback"
+  ],
+  "current_subsystem": 5,
+  "status": "completed"
+}

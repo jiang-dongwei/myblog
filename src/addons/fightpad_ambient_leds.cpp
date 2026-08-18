@@ -95,6 +95,98 @@ static RGB menuIndexToColor(uint8_t idx) {
     return ColorBlack;  // fallback
 }
 
+static constexpr uint8_t CUSTOM_THEME_BUTTON_COUNT = 12;
+static_assert(FIGHTPAD12SLIM_AMBIENT_GP22_LEDS_COUNT == CUSTOM_THEME_BUTTON_COUNT,
+              "Fightpad Custom Theme requires the fixed 12-button LED layout");
+
+static void setCustomThemeColor(
+    RGB (&theme)[CUSTOM_THEME_BUTTON_COUNT], int ledIndex, uint32_t color) {
+    if (ledIndex >= 0 && ledIndex < CUSTOM_THEME_BUTTON_COUNT) {
+        theme[ledIndex] = RGB(color);
+    }
+}
+
+static void loadCustomThemeColors(
+    const AnimationOptions& options,
+    RGB (&normal)[CUSTOM_THEME_BUTTON_COUNT],
+    RGB (&pressed)[CUSTOM_THEME_BUTTON_COUNT]) {
+    for (uint8_t i = 0; i < CUSTOM_THEME_BUTTON_COUNT; i++) {
+        normal[i] = ColorBlack;
+        pressed[i] = ColorBlack;
+    }
+
+    setCustomThemeColor(normal, LEDS_DPAD_LEFT, options.customThemeLeft);
+    setCustomThemeColor(normal, LEDS_DPAD_DOWN, options.customThemeDown);
+    setCustomThemeColor(normal, LEDS_DPAD_RIGHT, options.customThemeRight);
+    setCustomThemeColor(normal, LEDS_BUTTON_B3, options.customThemeB3);
+    setCustomThemeColor(normal, LEDS_BUTTON_B4, options.customThemeB4);
+    setCustomThemeColor(normal, LEDS_BUTTON_R1, options.customThemeR1);
+    setCustomThemeColor(normal, LEDS_BUTTON_L1, options.customThemeL1);
+    setCustomThemeColor(normal, LEDS_BUTTON_L2, options.customThemeL2);
+    setCustomThemeColor(normal, LEDS_BUTTON_R2, options.customThemeR2);
+    setCustomThemeColor(normal, LEDS_BUTTON_B2, options.customThemeB2);
+    setCustomThemeColor(normal, LEDS_BUTTON_B1, options.customThemeB1);
+    setCustomThemeColor(normal, LEDS_DPAD_UP, options.customThemeUp);
+
+    setCustomThemeColor(pressed, LEDS_DPAD_LEFT, options.customThemeLeftPressed);
+    setCustomThemeColor(pressed, LEDS_DPAD_DOWN, options.customThemeDownPressed);
+    setCustomThemeColor(pressed, LEDS_DPAD_RIGHT, options.customThemeRightPressed);
+    setCustomThemeColor(pressed, LEDS_BUTTON_B3, options.customThemeB3Pressed);
+    setCustomThemeColor(pressed, LEDS_BUTTON_B4, options.customThemeB4Pressed);
+    setCustomThemeColor(pressed, LEDS_BUTTON_R1, options.customThemeR1Pressed);
+    setCustomThemeColor(pressed, LEDS_BUTTON_L1, options.customThemeL1Pressed);
+    setCustomThemeColor(pressed, LEDS_BUTTON_L2, options.customThemeL2Pressed);
+    setCustomThemeColor(pressed, LEDS_BUTTON_R2, options.customThemeR2Pressed);
+    setCustomThemeColor(pressed, LEDS_BUTTON_B2, options.customThemeB2Pressed);
+    setCustomThemeColor(pressed, LEDS_BUTTON_B1, options.customThemeB1Pressed);
+    setCustomThemeColor(pressed, LEDS_DPAD_UP, options.customThemeUpPressed);
+}
+
+static void setCustomThemePressed(
+    bool (&pressed)[CUSTOM_THEME_BUTTON_COUNT], int ledIndex, bool value) {
+    if (ledIndex >= 0 && ledIndex < CUSTOM_THEME_BUTTON_COUNT) {
+        pressed[ledIndex] = value;
+    }
+}
+
+static void loadCustomThemePressedState(
+    const Gamepad* gamepad,
+    bool (&pressed)[CUSTOM_THEME_BUTTON_COUNT]) {
+    for (uint8_t i = 0; i < CUSTOM_THEME_BUTTON_COUNT; i++) {
+        pressed[i] = false;
+    }
+    if (gamepad == nullptr) {
+        return;
+    }
+
+    const uint32_t buttons = gamepad->state.buttons;
+    const uint8_t dpad = gamepad->state.dpad;
+    setCustomThemePressed(pressed, LEDS_BUTTON_B1, buttons & GAMEPAD_MASK_B1);
+    setCustomThemePressed(pressed, LEDS_BUTTON_B2, buttons & GAMEPAD_MASK_B2);
+    setCustomThemePressed(pressed, LEDS_BUTTON_B3, buttons & GAMEPAD_MASK_B3);
+    setCustomThemePressed(pressed, LEDS_BUTTON_B4, buttons & GAMEPAD_MASK_B4);
+    setCustomThemePressed(pressed, LEDS_BUTTON_L1, buttons & GAMEPAD_MASK_L1);
+    setCustomThemePressed(pressed, LEDS_BUTTON_R1, buttons & GAMEPAD_MASK_R1);
+    setCustomThemePressed(pressed, LEDS_BUTTON_L2, buttons & GAMEPAD_MASK_L2);
+    setCustomThemePressed(pressed, LEDS_BUTTON_R2, buttons & GAMEPAD_MASK_R2);
+    setCustomThemePressed(pressed, LEDS_DPAD_UP, dpad & GAMEPAD_MASK_UP);
+    setCustomThemePressed(pressed, LEDS_DPAD_DOWN, dpad & GAMEPAD_MASK_DOWN);
+    setCustomThemePressed(pressed, LEDS_DPAD_LEFT, dpad & GAMEPAD_MASK_LEFT);
+    setCustomThemePressed(pressed, LEDS_DPAD_RIGHT, dpad & GAMEPAD_MASK_RIGHT);
+}
+
+static RGB interpolateThemeColor(const RGB& a, const RGB& b,
+                                 uint16_t numerator, uint16_t denominator) {
+    const uint16_t inverse = denominator - numerator;
+    return RGB(
+        static_cast<uint8_t>((a.r * inverse + b.r * numerator + denominator / 2) /
+                             denominator),
+        static_cast<uint8_t>((a.g * inverse + b.g * numerator + denominator / 2) /
+                             denominator),
+        static_cast<uint8_t>((a.b * inverse + b.b * numerator + denominator / 2) /
+                             denominator));
+}
+
 bool FightpadAmbientLEDAddon::available() {
     if (FIGHTPAD12SLIM_AMBIENT_CONTROL_DIAGNOSTIC) {
         return true;
@@ -715,6 +807,29 @@ void FightpadAmbientLEDAddon::renderAmbient(uint32_t now) {
             }
         }
         break;
+
+    case LIGHT_EFFECT_CUSTOM_THEME:
+        {
+            RGB normal[CUSTOM_THEME_BUTTON_COUNT];
+            RGB pressed[CUSTOM_THEME_BUTTON_COUNT];
+            loadCustomThemeColors(
+                Storage::getInstance().getAnimationOptions(), normal, pressed);
+
+            // Treat the 12 button colors as a closed ring and sample it at
+            // 19 evenly-spaced positions for the decorative GP40 chain.
+            for (uint8_t i = 0; i < count; i++) {
+                const uint16_t scaled =
+                    static_cast<uint16_t>(i) * CUSTOM_THEME_BUTTON_COUNT;
+                const uint8_t left = static_cast<uint8_t>(scaled / count);
+                const uint8_t right = static_cast<uint8_t>(
+                    (left + 1U) % CUSTOM_THEME_BUTTON_COUNT);
+                const uint16_t remainder = scaled % count;
+                const RGB color = interpolateThemeColor(
+                    normal[left], normal[right], remainder, count);
+                frame[i] = color.value(fmt, effectBrightness);
+            }
+        }
+        break;
     }
 }
 
@@ -802,6 +917,23 @@ void FightpadAmbientLEDAddon::renderButtons(uint32_t now) {
                     (chaseHead + count - i) % count);
                 const uint32_t value = chaseColor.value(fmt, tailBrightness[i]);
                 frame_gp22[idx] = (now < gp22FlashUntil[idx]) ? flashV : value;
+            }
+        }
+        break;
+
+    case LIGHT_EFFECT_CUSTOM_THEME:
+        {
+            RGB normal[CUSTOM_THEME_BUTTON_COUNT];
+            RGB pressed[CUSTOM_THEME_BUTTON_COUNT];
+            bool held[CUSTOM_THEME_BUTTON_COUNT];
+            loadCustomThemeColors(
+                Storage::getInstance().getAnimationOptions(), normal, pressed);
+            loadCustomThemePressedState(
+                Storage::getInstance().GetGamepad(), held);
+
+            for (uint8_t i = 0; i < count; i++) {
+                const RGB& color = held[i] ? pressed[i] : normal[i];
+                frame_gp22[i] = color.value(fmt, effectBrightness);
             }
         }
         break;

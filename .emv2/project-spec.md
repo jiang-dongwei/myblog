@@ -347,3 +347,8 @@
 | S47-A | BLE Profile变化复用USB模式黑屏、强制保存和RP2350重启路径 | completed | 2026-08-17-ble-profile-visible-reboot |
 | S47-B | 保存顺序、Proxy同步窗口、相同Profile不重启和文档静态验证 | completed | 2026-08-17-ble-profile-visible-reboot |
 | S47-C | 用户构建烧录并验证启动Logo、C6切换及Bond恢复 | pending | 2026-08-17-ble-profile-visible-reboot |
+| S48-A | Custom Theme菜单、未定义提示、值7兼容持久化与延迟停用 | completed | 2026-08-18-custom-theme-lighting-menu |
+| S48-B | GP22固定12灯Normal/Pressed自定义主题渲染 | completed | 2026-08-18-custom-theme-lighting-menu |
+| S48-C | GP40将12色环形插值为19灯并保持覆盖优先级 | completed | 2026-08-18-custom-theme-lighting-menu |
+| S48-D | 菜单、存储、映射、边界、优先级与Chase周期非编译静态验证 | completed | 2026-08-18-custom-theme-lighting-menu |
+| S48-E | 用户构建烧录并完成Custom Theme及原灯效实机回归 | pending | 2026-08-18-custom-theme-lighting-menu |

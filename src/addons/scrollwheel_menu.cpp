@@ -34,6 +34,7 @@ uint8_t legacyButtonEffectToLightEffect(uint8_t effect) {
         case 4: return LIGHT_EFFECT_BREATHING;
         case 1: return LIGHT_EFFECT_RAINBOW;
         case 2: return LIGHT_EFFECT_CHASE;
+        case 7: return LIGHT_EFFECT_CUSTOM_THEME;
         case 3: return LIGHT_EFFECT_STATIC_COLOR; // legacy Static Theme
         case 5: return LIGHT_EFFECT_RAINBOW;      // legacy Breathing Rainbow
         default: return LIGHT_EFFECT_UNSET;
@@ -47,6 +48,7 @@ uint8_t legacyAmbientEffectToLightEffect(uint8_t effect) {
         case 5: return LIGHT_EFFECT_BREATHING;
         case 4: return LIGHT_EFFECT_RAINBOW;
         case 2: return LIGHT_EFFECT_CHASE;
+        case 7: return LIGHT_EFFECT_CUSTOM_THEME;
         case 3: return LIGHT_EFFECT_RAINBOW; // legacy Breathing Rainbow
         default: return LIGHT_EFFECT_UNSET;
     }
@@ -59,6 +61,7 @@ uint8_t lightEffectToLegacyButtonEffect(uint8_t effect) {
         case LIGHT_EFFECT_BREATHING:    return 4;
         case LIGHT_EFFECT_RAINBOW:      return 1;
         case LIGHT_EFFECT_CHASE:        return 2;
+        case LIGHT_EFFECT_CUSTOM_THEME: return 7;
         default:                        return 0xFF;
     }
 }
@@ -70,6 +73,7 @@ uint8_t lightEffectToLegacyAmbientEffect(uint8_t effect) {
         case LIGHT_EFFECT_BREATHING:    return 5;
         case LIGHT_EFFECT_RAINBOW:      return 4;
         case LIGHT_EFFECT_CHASE:        return 2;
+        case LIGHT_EFFECT_CUSTOM_THEME: return 7;
         default:                        return 0xFF;
     }
 }
@@ -161,6 +165,7 @@ const SWMenuItem kMenuLightEffects[] = {
     { "Breathing",    SWMenuLevel::COLOR_EFFECT_BREATH, LIGHT_EFFECT_BREATHING },
     { "Rainbow",      SWMenuLevel::INFO,                LIGHT_EFFECT_RAINBOW },
     { "Chase",        SWMenuLevel::COLOR_EFFECT_CHASE,  LIGHT_EFFECT_CHASE },
+    { "Custom Theme", SWMenuLevel::INFO,                LIGHT_EFFECT_CUSTOM_THEME },
 };
 const uint8_t kMenuLightEffectsCount = sizeof(kMenuLightEffects) / sizeof(kMenuLightEffects[0]);
 
@@ -261,6 +266,7 @@ void ScrollWheelMenuAddon::setup() {
     btnTimer        = 0;
     debouncedButton = false;
     btnFromLong     = false;
+    customThemePromptUntil = 0;
 
     g_menuState.active = false;
     g_menuState.level = 0;
@@ -434,6 +440,17 @@ void ScrollWheelMenuAddon::navSelect() {
     SWMenuLevel currentLevel = static_cast<SWMenuLevel>(g_menuState.level);
     uint8_t idx = g_menuState.index;
 
+    // The warning page is transient. A short press dismisses it immediately
+    // without changing the running effect or its persisted star marker.
+    if (currentLevel == SWMenuLevel::CUSTOM_THEME_UNDEFINED) {
+        g_menuState.level = static_cast<uint8_t>(SWMenuLevel::LIGHT_EFFECT);
+        g_menuState.index = LIGHT_EFFECT_CUSTOM_THEME;
+        g_menuState.scrollOffset = 0;
+        clampScrollOffset();
+        markMenuDirty();
+        return;
+    }
+
     // Battery Info uses index as a page number.  A short press advances to
     // the next page; the rotary inputs use navUp/navDown for either direction.
     if (currentLevel == SWMenuLevel::BATTERY_INFO) {
@@ -516,6 +533,20 @@ void ScrollWheelMenuAddon::navSelect() {
         const SWMenuItem* table = currentMenuTable();
         const SWMenuItem& item = table[idx];
         if (item.targetLevel == SWMenuLevel::INFO) {
+            // Disabling the Web Config theme prevents a new activation, but
+            // an already-running Custom Theme remains valid across reboot.
+            // This failure path deliberately changes no light or flash state.
+            if (item.targetIndex == LIGHT_EFFECT_CUSTOM_THEME &&
+                !Storage::getInstance().getAnimationOptions().hasCustomTheme &&
+                g_menuLightEffect != LIGHT_EFFECT_CUSTOM_THEME) {
+                customThemePromptUntil =
+                    getMillis() + SCROLLWHEEL_CUSTOM_THEME_PROMPT_MS;
+                g_menuState.level = static_cast<uint8_t>(
+                    SWMenuLevel::CUSTOM_THEME_UNDEFINED);
+                g_menuState.scrollOffset = 0;
+                markMenuDirty();
+                return;
+            }
             g_menuLightEffect = item.targetIndex;
             g_menuRgbPowerEnabled = true;
             g_manualLightEffectsEnabled = true;
@@ -744,6 +775,14 @@ void ScrollWheelMenuAddon::navBack() {
         g_menuState.scrollOffset = 0;
         markMenuDirty();
         break;
+    case SWMenuLevel::CUSTOM_THEME_UNDEFINED:
+        // Dismiss the warning without changing the active effect/star.
+        g_menuState.level = static_cast<uint8_t>(SWMenuLevel::LIGHT_EFFECT);
+        g_menuState.index = LIGHT_EFFECT_CUSTOM_THEME;
+        g_menuState.scrollOffset = 0;
+        clampScrollOffset();
+        markMenuDirty();
+        break;
     case SWMenuLevel::INFO:
         if (g_menuState.infoSource == 0) {
             g_menuState.level = static_cast<uint8_t>(SWMenuLevel::MAIN);
@@ -885,6 +924,17 @@ void ScrollWheelMenuAddon::updateGameplayInputLock(uint32_t now) {
 void ScrollWheelMenuAddon::process() {
     uint32_t now = getMillis();
 
+    if (g_menuState.active &&
+        static_cast<SWMenuLevel>(g_menuState.level) ==
+            SWMenuLevel::CUSTOM_THEME_UNDEFINED &&
+        static_cast<int32_t>(now - customThemePromptUntil) >= 0) {
+        g_menuState.level = static_cast<uint8_t>(SWMenuLevel::LIGHT_EFFECT);
+        g_menuState.index = LIGHT_EFFECT_CUSTOM_THEME;
+        g_menuState.scrollOffset = 0;
+        clampScrollOffset();
+        markMenuDirty();
+    }
+
     // Keep OLED activity ownership on Core0. Use the already-debounced
     // gameplay GPIO state so every physical GP2..GP20 key, including controls
     // such as Turbo that may not appear in the final HID button report, wakes
@@ -914,7 +964,8 @@ void ScrollWheelMenuAddon::process() {
     if (g_menuState.active) {
         // INFO pages display static text; there is no list to scroll.
         SWMenuLevel level = static_cast<SWMenuLevel>(g_menuState.level);
-        if (level != SWMenuLevel::INFO) {
+        if (level != SWMenuLevel::INFO &&
+            level != SWMenuLevel::CUSTOM_THEME_UNDEFINED) {
             bool aPressed = aRaw && !prevA;
             bool bPressed = bRaw && !prevB;
 

@@ -601,6 +601,13 @@ void DisplayAddon::drawScrollWheelMenu() {
     gpDisplay->clearScreen();
     SWMenuLevel level = static_cast<SWMenuLevel>(snap.level);
 
+    if (level == SWMenuLevel::CUSTOM_THEME_UNDEFINED) {
+        gpDisplay->drawText(0, 2, "Custom Theme");
+        gpDisplay->drawText(0, 4, "Not Defined");
+        gpDisplay->render();
+        return;
+    }
+
     // ── INFO page ──────────────────────────────────────────────────
     if (level == SWMenuLevel::INFO) {
         if (snap.infoSource == 0) {

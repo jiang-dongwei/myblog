@@ -50,6 +50,10 @@ static constexpr uint32_t SCROLLWHEEL_GAMEPLAY_GPIO_MASK = 0x001FFFFCu;
 #define SCROLLWHEEL_ROTARY_DEBOUNCE_MS 80
 #endif
 
+#ifndef SCROLLWHEEL_CUSTOM_THEME_PROMPT_MS
+#define SCROLLWHEEL_CUSTOM_THEME_PROMPT_MS 1500
+#endif
+
 #define ScrollWheelMenuName "ScrollWheelMenu"
 
 // ── Menu tree definition (shared between Core0 nav and Core1 render) ─────
@@ -67,6 +71,7 @@ enum class SWMenuLevel : uint8_t {
     BRIGHTNESS    = 11, // Level 2: shared Key/Base effect brightness
     CONTROLLER_TYPE = 12, // Level 1: upstream wired USB input mode picker
     BLUETOOTH_TYPE  = 13, // Level 1: ESP32-C6 BLE HID profile picker
+    CUSTOM_THEME_UNDEFINED = 14, // Temporary non-blocking warning page
 };
 
 // Unified runtime effect IDs used by both the GP22 Key chain and GP40 Base
@@ -78,7 +83,8 @@ enum SWLightEffect : uint8_t {
     LIGHT_EFFECT_BREATHING    = 2,
     LIGHT_EFFECT_RAINBOW      = 3,
     LIGHT_EFFECT_CHASE        = 4,
-    LIGHT_EFFECT_COUNT        = 5,
+    LIGHT_EFFECT_CUSTOM_THEME = 5,
+    LIGHT_EFFECT_COUNT        = 6,
     LIGHT_EFFECT_UNSET        = 0xFF,
 };
 
@@ -250,6 +256,7 @@ private:
     // GP19 BACK button
     bool prevBack = false;
     uint32_t lastBackTime = 0;
+    uint32_t customThemePromptUntil = 0;
 
     // Stored parent indices for BACK navigation
     uint8_t mainIndex = 0;       // which item was selected in level 0
