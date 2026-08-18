@@ -2,7 +2,7 @@
 
 状态：协议 v1，已确认，可进入实现  
 适用 RP2350 工程：`E:\ComporyProject\aa\GP2040-CE`  
-适用 ESP32-C6 工程：`E:\WorkSpace\C_WorkSpacee\ESP-IDF5.2\.espressif\release-v5.2\esp32c6_ble_hid_gamepad_test`
+适用 ESP32-C6 工程：`E:\WorkSpace\C_WorkSpacee\ESP-IDF5.2\.espressif\release-v5.2\esp32c6_fix_mac_connection`
 
 > 本文继续作为 RP2350/C6 UART Profile 协议依据。关于“让 PC 按目标手柄
 > 类型识别”的产品目标、能力边界和验收方法，以
@@ -11,6 +11,10 @@
 
 > GPIO13 配对键按下后无 `Pairing` 的当前回归，以
 > `docs/ESP32C6_GPIO13_PAIRING_REGRESSION_HANDOFF.md` 为修复和验收依据。
+
+> Switch BLE Profile 4 的S11增量接口、RP2350修改范围和测试向量，以
+> `docs/ESP32C6_SWITCH_BLE_PROFILE_RP2350_HANDOFF.md` 为准。本文已经同步
+> Profile `0..4` 的公共接口；更具体的 Switch 实现边界仍以该增量文档为准。
 
 > 两边 AI 必须以本文为唯一接口依据。任何字节布局、Profile ID 或结果码
 > 的变化，都必须更新本文并同时修改两边工程。
@@ -44,7 +48,8 @@ typedef enum {
     FIGHTPAD_BLE_PROFILE_GENERIC  = 0,
     FIGHTPAD_BLE_PROFILE_XBOX     = 1,
     FIGHTPAD_BLE_PROFILE_KEYBOARD = 2,
-    FIGHTPAD_BLE_PROFILE_PS5_PC   = 3,
+    FIGHTPAD_BLE_PROFILE_PS5_PC   = 3, // 保留协议名称，当前为PS4兼容BLE Profile
+    FIGHTPAD_BLE_PROFILE_SWITCH   = 4,
 } fightpad_ble_profile_t;
 ```
 
@@ -54,17 +59,19 @@ RP2350 新配置字段建议为：
 optional uint32 bluetoothProfile = 12 [default = 1];
 ```
 
-字段归属：`FightpadESP32ProxyOptions`。读取时仍必须进行 `0..3` 范围
+字段归属：`FightpadESP32ProxyOptions`。读取时仍必须进行 `0..4` 范围
 校验；越界值按 Generic 处理，并显示/记录回退原因。
 
 菜单顺序：
 
 1. `XBOX BLE`
 2. `GENERIC BLE`
-3. `KEYBOARD BLE`
-4. `PS5 BLE (PC)`
+3. `PS BLE`
+4. `SWITCH BLE`
 
 菜单顺序不等于协议编号，代码必须通过表项显式映射。
+Keyboard Profile 2继续保留在UART协议、配置兼容和C6实现中，但不再作为
+Fightpad量产菜单选项显示；已有数值2的配置仍可解析。
 
 ## 3. UART 公共格式
 
@@ -104,7 +111,7 @@ RP2350 到 ESP32-C6：
 | 0 | magic | `0x46`，ASCII `F` |
 | 1 | type | `0x4D`，ASCII `M` |
 | 2 | version | `0x01` |
-| 3 | profile | `0..3` |
+| 3 | profile | `0..4` |
 | 4 | sequence | 每次新请求递增，8 位回绕 |
 | 5 | flags | 见下表 |
 | 6 | reserved | v1 必须为 `0` |
@@ -117,9 +124,14 @@ Flags：
 #define BLE_PROFILE_FLAG_FORCE_REPAIR 0x02  // v1菜单暂不使用，保留
 ```
 
-- USB Transport 下修改菜单：只保存 RP2350 配置，不发送 Mode，不重启 C6。
+- USB Transport 下修改菜单：强制保存 RP2350 配置，不发送 Mode、不启动 C6；
+  保存后RP2350使用与USB Controller Type相同的500ms黑屏重启和启动Logo。
+  这里的强制保存只针对用户明确选择的BLE Profile，用于绕过PS4/PS5 USB
+  认证期间的普通保存保护。
 - 进入 Bluetooth Transport：发送 `APPLY_NOW`。
-- Bluetooth Transport 中修改：保存后立即发送 `APPLY_NOW`。
+- Bluetooth Transport 中修改：Flash保存成功后发送`APPLY_NOW`，同时RP2350
+  进入500ms黑屏重启；保存完成前不得把仅存在RAM的目标Profile发给C6，
+  保存失败时恢复旧RAM值并显示`Save Failed`。
 - v1 未定义的 flag 位必须为 0；C6 应忽略未知位并记录日志。
 
 ## 5. ACK 帧
@@ -131,7 +143,7 @@ ESP32-C6 到 RP2350：
 | 0 | magic | `0x46` |
 | 1 | type | `0x41`，ASCII `A` |
 | 2 | version | `0x01` |
-| 3 | accepted profile | C6 最终接受的 `0..3` |
+| 3 | accepted profile | C6 最终接受的 `0..4` |
 | 4 | sequence | 原样复制 Mode sequence |
 | 5 | result | 见下表 |
 | 6 | reserved | v1 必须为 `0` |
@@ -182,6 +194,24 @@ RP2350 只接受同时匹配 version 和 sequence 的 ACK。旧 ACK 可以记录
 46 41 01 01 2A 00 00 2D
 ```
 
+### Switch Mode，sequence `0x2B`，立即应用
+
+```text
+46 4D 01 04 2B 01 00 24
+```
+
+### 接受 Switch 并准备重启
+
+```text
+46 41 01 04 2B 01 00 28
+```
+
+### Switch 已经活动，无需重启
+
+```text
+46 41 01 04 2B 00 00 29
+```
+
 收到 checksum 错误的帧必须静默丢弃或仅输出限频日志，不得更新 NVS。
 
 ## 7. RP2350 状态机
@@ -219,13 +249,13 @@ IDLE
 3. 在 `esp_hidd_dev_init()` 前提供约 500 ms 的 Profile 同步窗口。
 4. 若窗口内收到有效 Mode：
    - 与 NVS 相同：回复 `ACTIVE_UNCHANGED` 或 `APPLYING_AT_BOOT`。
-   - 与 NVS 不同：保存新值并标记 `clear_bonds_pending`、
-     `pair_after_boot`，回复 `APPLYING_AT_BOOT`。
+   - 与 NVS 不同：保存新值并切换到该 Profile 独立的 Bond 工作区和 BLE 身份，
+     回复 `APPLYING_AT_BOOT`。
 5. 超时未收到 Mode：使用 NVS 回退继续启动，不能永久等待 RP2350。
 6. 根据最终 Profile 选择 descriptor/config/encoder，再调用
    `esp_hidd_dev_init()`。
-7. 若存在 `clear_bonds_pending`，在开始广告前清理旧绑定，成功后清除标记。
-8. 若存在 `pair_after_boot`，BLE host ready 后开启 30 秒配对，随后清除标记。
+7. 当前 Profile 已有 Bond 时恢复该 Profile 的绑定并重连；没有 Bond 时才开启
+   30 秒配对窗口。不得清除其他 Profile 的 Bond。
 
 ### BLE 已运行时收到新 Profile
 
@@ -233,13 +263,13 @@ UART 接收任务不得直接调用复杂 BLE 生命周期 API。应投递控制
 控制任务执行：
 
 1. 校验并保存新 Profile。
-2. 原子保存 `clear_bonds_pending=true` 和 `pair_after_boot=true`。
+2. 保留各 Profile 独立 Bond，只持久化新的 Profile 选择和重启 pending 状态。
 3. 回复 `RESTARTING`，确认 UART 写入完成。
 4. 延迟约 50 ms，执行 `esp_restart()`。
-5. 新启动按上述启动流程清绑定并进入 30 秒配对。
+5. 新启动按上述流程恢复目标 Profile 的 Bond；首次使用时进入 30 秒配对。
 
 如果断电发生在 ACK 与重启之间，持久化的 pending 标志保证下一次启动仍会
-完成清理与配对。
+继续应用目标 Profile，并恢复该 Profile 自己的 Bond 或首次配对流程。
 
 ## 9. Profile 模块结构
 
@@ -278,7 +308,7 @@ Profile definition 包含：
 ## 10. 输入映射
 
 RP2350 继续发送现有归一化 15-bit 按键、dpad、LX 和 LY。Profile 差异由
-C6 encoder 负责，避免为四个模式创建四种 RP 输入帧。
+C6 encoder 负责，避免为五个模式创建五种 RP 输入帧。
 
 物理 Turbo 位继续作为产品内部功能，不导出为主机额外按键。
 
@@ -293,7 +323,7 @@ C6 encoder 负责，避免为四个模式创建四种 RP 输入帧。
 | S1/S2 | View/Menu |
 | A1/A2 | Guide/Share 或 Capture |
 
-### PS5 BLE (PC)
+### PS4 BLE (PC)
 
 | Fightpad | Host |
 |---|---|
@@ -303,8 +333,8 @@ C6 encoder 负责，避免为四个模式创建四种 RP 输入帧。
 | S1/S2 | Create/Options |
 | A1/A2 | PS/Touchpad click |
 
-未实现的触摸坐标、陀螺仪、加速度计和自适应扳机字段保持中性。该模式只以
-Windows/Steam/SDL 实验兼容为目标，不承诺 PS5 主机兼容。
+未实现的触摸坐标、陀螺仪和加速度计字段保持中性。该模式只以
+Windows/Steam/SDL 兼容为目标，不承诺 PlayStation 主机兼容。
 
 ### Keyboard BLE
 
@@ -327,6 +357,13 @@ v1 不同步 Web Config 中 USB Keyboard Mapping。C6 必须根据完整按键�
 首先通过新模块复现当前 Generic gamepad 的方向、摇杆和普通按键行为，作为
 重构回归基线。
 
+### Switch BLE
+
+RP2350 仍发送相同的归一化输入帧，由 C6 编码为 Report ID `0x30`、63 字节
+payload 的 Switch 风格报告。PC 侧目标能力为 4 axes、18 buttons 和 Hat；
+不承诺连接 Nintendo Switch 主机，也不要求 RP2350 实现 Switch 握手、震动
+或 IMU 协议。
+
 ## 11. BLE 身份策略
 
 Profile ID 表示报告行为，不等价于某厂商授权身份。身份表必须支持至少两种
@@ -337,7 +374,7 @@ Compatibility/Test：用于实验室验证主机识别
 Production：使用明确获得授权或分配的 VID/PID 与 FIGHTPAD 品牌
 ```
 
-不得把 Microsoft/Sony VID/PID 冒用方案默认为唯一量产路径。Xbox/PS5 参考
+不得把 Microsoft/Sony/Nintendo VID/PID 冒用方案默认为唯一量产路径。Xbox/PS4/Switch 参考
 描述符若来自第三方开源项目，必须保留来源和许可证记录，并单独复核商标、
 VID/PID 与主机认证要求。
 
@@ -357,27 +394,29 @@ VID/PID 与主机认证要求。
 - 添加 `'M'/'A'` 解析与测试向量。
 - 添加 NVS Profile/pending 状态。
 - 在 HID init 前选择 Profile。
-- 按 Generic -> Keyboard -> Xbox -> PS5-PC 顺序提交功能。
+- 按 Generic -> Keyboard -> Xbox -> PS4-PC -> Switch 顺序提交功能。
 - 不自行更改本文协议；发现冲突时先报告。
 
 ## 13. 联调验收表
 
 | 场景 | 预期 |
 |---|---|
-| USB 下改变 BLE Profile | USB 类型不变，C6 不被唤醒/重启 |
+| USB 下改变 BLE Profile | USB类型不变且C6不启动；RP2350保存后重启并显示启动Logo |
 | 切到 BT，Profile 未变 | 保留 bond，直接重连 |
-| BT 下改变 Profile | ACK 后仅 C6 重启，进入 30 秒配对 |
+| BT 下改变 Profile | RP2350保存后重启；C6应用Profile并重启，恢复目标Bond，首次使用才配对 |
 | 同一 Profile 再次选择 | 不重启、不清 bond |
 | C6 无 ACK | RP 2 秒超时并显示错误，不无限重启 |
 | 错 checksum | 丢弃，不写 NVS |
 | 错 version | 回复 unsupported，不改变当前 Profile |
 | Profile 越界 | 回退 Generic 并明确报告 |
-| C6 重启中断电 | 下次启动依据 pending 标志完成清 bond/配对 |
+| C6 重启中断电 | 下次启动依据 pending 状态继续应用目标 Profile |
 | 普通整机断电重启 | 不重新配对，只重连最近已绑定主机 |
 | Generic | 当前基础映射无回归 |
 | Keyboard | 按下、组合键、释放均无粘键 |
 | Xbox | PC 测试平台映射符合表格 |
-| PS5-PC | Windows/Steam/SDL 基础按键符合表格 |
+| PS4-PC | Windows/Steam/SDL 基础按键符合表格 |
+| Switch | `057E:2009`、4 axes、18 buttons、Hat，按键可用 |
+| Switch -> PS4 -> Switch | 第二次进入 Switch 恢复独立 Bond，不要求重新配对 |
 
 ## 14. 版本与交付
 

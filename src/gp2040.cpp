@@ -396,6 +396,9 @@ void GP2040::run() {
 
 		// Config Loop (Web-Config skips Core0 add-ons)
 		if (configMode == true) {
+			// Core1's button-layout screen reads this snapshot. Keep it current in
+			// Web Config even though the normal gamepad/add-on pipeline is skipped.
+			memcpy(&processedGamepad->state, &gamepad->state, sizeof(GamepadState));
 			inputDriver->process(gamepad);
 			rebootHotkeys.process(gamepad, configMode);
 			checkSaveRebootState();
@@ -667,7 +670,8 @@ void GP2040::checkProcessedState(const GamepadState& prevState, const GamepadSta
 void GP2040::checkSaveRebootState() {
 	if (saveRequested) {
 		saveRequested = false;
-		Storage::getInstance().save(forceSave);
+		saveSuccessful = Storage::getInstance().save(forceSave);
+		handleFightpadBluetoothProfileSaveResult(saveSuccessful);
 	}
 
 	if (rebootRequested) {

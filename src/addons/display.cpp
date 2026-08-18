@@ -294,6 +294,9 @@ void DisplayAddon::process() {
         case FightpadESP32BluetoothProfileStatus::ProtocolError:
             gpDisplay->drawText(3, 5, "Protocol Error");
             break;
+        case FightpadESP32BluetoothProfileStatus::SaveFailed:
+            gpDisplay->drawText(4, 5, "Save Failed");
+            break;
         case FightpadESP32BluetoothProfileStatus::Ready:
         default:
             break;
@@ -683,6 +686,8 @@ void DisplayAddon::drawScrollWheelMenu() {
         case SWMenuLevel::COLOR_EFFECT:
         case SWMenuLevel::COLOR_EFFECT_BREATH:
             table = kMenuColors; count = kMenuColorsCount; break;
+        case SWMenuLevel::COLOR_EFFECT_CHASE:
+            table = kMenuChaseColors; count = kMenuChaseColorsCount; break;
         case SWMenuLevel::LIGHT_EFFECT:
             table = kMenuLightEffects; count = kMenuLightEffectsCount; break;
         case SWMenuLevel::BRIGHTNESS:
@@ -715,7 +720,8 @@ void DisplayAddon::drawScrollWheelMenu() {
     switch (level) {
         case SWMenuLevel::COLOR:               activeVal = g_menuRgbButton;       break;
         case SWMenuLevel::COLOR_EFFECT:
-        case SWMenuLevel::COLOR_EFFECT_BREATH: activeVal = g_menuRgbEffectColor;  break;
+        case SWMenuLevel::COLOR_EFFECT_BREATH:
+        case SWMenuLevel::COLOR_EFFECT_CHASE:  activeVal = g_menuRgbEffectColor;  break;
         case SWMenuLevel::LIGHT_EFFECT:        activeVal = g_menuLightEffect;     break;
         case SWMenuLevel::BRIGHTNESS:          activeVal = g_menuBrightnessLevel; break;
         case SWMenuLevel::CONTROLLER_TYPE:

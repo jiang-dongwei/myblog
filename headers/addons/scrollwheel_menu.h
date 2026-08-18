@@ -62,6 +62,7 @@ enum class SWMenuLevel : uint8_t {
     LIGHT_EFFECT  = 4,  // Level 2: shared GP22/GP40 effect picker
     COLOR_EFFECT  = 6,  // Level 3: shared color picker under Static Color
     COLOR_EFFECT_BREATH = 8, // Level 3: shared color picker under Breathing
+    COLOR_EFFECT_CHASE = 9, // Level 3: shared color picker under Chase
     BATTERY_INFO  = 10, // Battery runtime/config/calibration/charge pages
     BRIGHTNESS    = 11, // Level 2: shared Key/Base effect brightness
     CONTROLLER_TYPE = 12, // Level 1: upstream wired USB input mode picker
@@ -100,6 +101,9 @@ extern const uint8_t      kMenuRgbSubCount;
 
 extern const SWMenuItem kMenuColors[];
 extern const uint8_t      kMenuColorsCount;
+
+extern const SWMenuItem kMenuChaseColors[];
+extern const uint8_t      kMenuChaseColorsCount;
 
 extern const SWMenuItem kMenuLightEffects[];
 extern const uint8_t      kMenuLightEffectsCount;
@@ -151,8 +155,9 @@ extern volatile bool g_scrollWheelButtonLongPressed;
 extern std::atomic<uint32_t> g_scrollWheelLastActivityMs;
 
 // ── RGB color overrides set from the menu ───────────────────────────────
-// Each stores an AnimationStation `colors` vector index (0..15), or 0xFF
-// for "not set" (use default DIP cycling / white flash).
+// Each stores an AnimationStation `colors` vector index (0..15), or 0xFF.
+// For the shared effect color, 0xFF selects Rainbow while Chase is active;
+// for button flash it means "not set" and uses the default white flash.
 //  0 = ColorBlack (OFF), 1 = ColorWhite, 2 = ColorRed, 3 = ColorOrange,
 //  4 = ColorYellow, 5 = ColorLimeGreen, 6 = ColorGreen, 7 = ColorSeafoam,
 //  8 = ColorAqua, 9 = ColorSkyBlue, 10 = ColorBlue, 11 = ColorPurple,
@@ -178,6 +183,12 @@ extern volatile bool g_manualLightEffectsEnabled;
 // One-shot RAM-only blackout used to make a pending Controller Type reboot
 // visible. It is never persisted, so the saved light effect returns on boot.
 extern volatile bool g_scrollWheelRebootBlackout;
+
+// BLE Profile changes are written asynchronously by GP2040 at the end of the
+// Core0 loop.  The ESP32 proxy must not transmit the RAM-only value before the
+// flash write succeeds.
+bool isFightpadBluetoothProfileSavePending();
+void handleFightpadBluetoothProfileSaveResult(bool successful);
 
 // Shared brightness for Key/Base Static Color, Gradient and Rainbow.
 // 0 = Bright (0.5f), 1 = Normal (0.3f), 2 = Dim (0.1f).

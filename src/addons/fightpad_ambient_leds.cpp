@@ -702,7 +702,9 @@ void FightpadAmbientLEDAddon::renderAmbient(uint32_t now) {
                 chaseHead,
                 static_cast<uint8_t>((chaseHead + count / 2U) % count),
             };
-            const RGB chaseColor = RGB::wheel(static_cast<uint8_t>(wheelFrame));
+            const RGB chaseColor = (g_menuRgbEffectColor == 0xFF)
+                ? RGB::wheel(static_cast<uint8_t>(wheelFrame))
+                : baseColor;
             static const float tailBrightness[3] = {0.80f, 0.25f, 0.05f};
             for (uint8_t segment = 0; segment < 2; segment++) {
                 for (uint8_t i = 0; i < 3; i++) {
@@ -788,7 +790,9 @@ void FightpadAmbientLEDAddon::renderButtons(uint32_t now) {
                 lightChaseStartedMs,
                 FIGHTPAD12SLIM_GP22_LIGHT_CHASE_CYCLE_MS,
                 count);
-            const RGB chaseColor = RGB::wheel(static_cast<uint8_t>(wheelFrame));
+            const RGB chaseColor = (g_menuRgbEffectColor == 0xFF)
+                ? RGB::wheel(static_cast<uint8_t>(wheelFrame))
+                : baseColor;
             for (int i = 0; i < count; i++) {
                 frame_gp22[i] = (now < gp22FlashUntil[i]) ? flashV : 0;
             }

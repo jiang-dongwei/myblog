@@ -31,7 +31,8 @@ namespace
     {
         switch (profile) {
             case FightpadBluetoothProfile::Xbox:     return "XINPUT";
-            case FightpadBluetoothProfile::PS5PC:    return "PS5";
+            case FightpadBluetoothProfile::PS5PC:    return "PS4";
+            case FightpadBluetoothProfile::Switch:   return "SWITCH";
             case FightpadBluetoothProfile::Keyboard: return "HID-KB";
             case FightpadBluetoothProfile::Generic:
             default:                                 return "USBHID";
@@ -47,7 +48,8 @@ namespace
 
         switch (bluetoothProfile) {
             case FightpadBluetoothProfile::Xbox:     return INPUT_MODE_XINPUT;
-            case FightpadBluetoothProfile::PS5PC:    return INPUT_MODE_PS5;
+            case FightpadBluetoothProfile::PS5PC:    return INPUT_MODE_PS4;
+            case FightpadBluetoothProfile::Switch:   return INPUT_MODE_SWITCH;
             case FightpadBluetoothProfile::Keyboard: return INPUT_MODE_KEYBOARD;
             case FightpadBluetoothProfile::Generic:
             default:                                 return INPUT_MODE_GENERIC;
@@ -382,6 +384,19 @@ void ButtonLayoutScreen::shutdown() {
 int8_t ButtonLayoutScreen::update() {
     bool configMode = DriverManager::getInstance().isConfigMode();
     uint8_t profileNumber = getGamepad()->getOptions().profileNumber;
+
+    // In Web Config, B1 returns to the instruction screen. Check B1's own
+    // release edge before doing any layout/history work so other held button
+    // bits cannot block the exit.
+    if (configMode) {
+        uint16_t buttonState = getGamepad()->state.buttons;
+        bool b1Released = (prevButtonState & GAMEPAD_MASK_B1) &&
+                          !(buttonState & GAMEPAD_MASK_B1);
+        prevButtonState = buttonState;
+        if (b1Released) {
+            return DisplayMode::CONFIG_INSTRUCTION;
+        }
+    }
     
     // Check if we've updated button layouts while in config mode
     if (configMode) {
@@ -406,19 +421,6 @@ int8_t ButtonLayoutScreen::update() {
 	generateHeader();
     if (isInputHistoryEnabled)
 		processInputHistory();
-
-    // check for exit/screen change
-    if (DriverManager::getInstance().isConfigMode()) {
-        uint16_t buttonState = getGamepad()->state.buttons;
-        if (prevButtonState && !buttonState) {
-            if (prevButtonState == GAMEPAD_MASK_B1) {
-                prevButtonState = 0;
-                return DisplayMode::CONFIG_INSTRUCTION;
-            }
-        }
-        prevButtonState = buttonState;
-    }
-
 	return -1;
 }
 

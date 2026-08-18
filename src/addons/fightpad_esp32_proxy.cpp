@@ -9,6 +9,7 @@
 #include "hardware/sync.h"
 #include "pico/critical_section.h"
 
+#include <cstdio>
 #include <cstring>
 
 namespace {
@@ -204,6 +205,17 @@ bool isFightpadESP32BluetoothProfileEventActive(
            (now - event.receivedAtMs) < FIGHTPAD12SLIM_ESP32_PROFILE_OVERLAY_MS;
 }
 
+void publishFightpadESP32BluetoothProfileSaveFailed(FightpadBluetoothProfile profile)
+{
+    if (!critical_section_is_initialized(&bluetoothProfileCriticalSection)) {
+        return;
+    }
+
+    publishBluetoothProfileStatus(
+        FightpadESP32BluetoothProfileStatus::SaveFailed,
+        profile);
+}
+
 bool getFightpadESP32ActiveBluetoothProfile(FightpadBluetoothProfile& profile)
 {
     if (!critical_section_is_initialized(&bluetoothProfileCriticalSection)) {
@@ -288,6 +300,16 @@ void FightpadESP32ProxyAddon::setup()
         critical_section_init(&bluetoothProfileCriticalSection);
     }
 
+    const FightpadESP32ProxyOptions& profileOptions =
+        Storage::getInstance().getAddonOptions().fightpadESP32ProxyOptions;
+    const FightpadBluetoothProfile bootProfile =
+        profileOptions.has_bluetoothProfile
+            ? normalizeFightpadBluetoothProfile(profileOptions.bluetoothProfile)
+            : FightpadBluetoothProfile::Xbox;
+    printf("[FightpadBLE] Profile boot config: has=%u profile=%u\n",
+           profileOptions.has_bluetoothProfile ? 1u : 0u,
+           static_cast<unsigned>(bootProfile));
+
     if (isValidPin(FIGHTPAD12SLIM_TRANSPORT_SEL_PIN)) {
         gpio_init(FIGHTPAD12SLIM_TRANSPORT_SEL_PIN);
         gpio_set_dir(FIGHTPAD12SLIM_TRANSPORT_SEL_PIN, GPIO_IN);
@@ -295,15 +317,16 @@ void FightpadESP32ProxyAddon::setup()
     }
 
 #if FIGHTPAD12SLIM_ESP32_PROXY_ENABLE_FOLLOWS_TRANSPORT
+    // Hold the C6 disabled while the RP2350 UART receiver is being prepared.
+    // Besides closing the boot-time receive race, this guarantees that an
+    // RP2350 reboot in BLE mode also causes a fresh C6 boot and FI sequence.
     if (isValidPin(FIGHTPAD12SLIM_ESP32_PROXY_ENABLE_PIN)) {
-        const bool esp32Enabled = isBluetoothTransportSelected();
-        const bool outputLevel = esp32Enabled
-            ? (FIGHTPAD12SLIM_ESP32_PROXY_ENABLE_ACTIVE_LEVEL != 0)
-            : (FIGHTPAD12SLIM_ESP32_PROXY_ENABLE_ACTIVE_LEVEL == 0);
+        const bool disabledLevel =
+            (FIGHTPAD12SLIM_ESP32_PROXY_ENABLE_ACTIVE_LEVEL == 0);
         gpio_init(FIGHTPAD12SLIM_ESP32_PROXY_ENABLE_PIN);
-        gpio_put(FIGHTPAD12SLIM_ESP32_PROXY_ENABLE_PIN, outputLevel);
+        gpio_put(FIGHTPAD12SLIM_ESP32_PROXY_ENABLE_PIN, disabledLevel);
         gpio_set_dir(FIGHTPAD12SLIM_ESP32_PROXY_ENABLE_PIN, GPIO_OUT);
-        lastESP32Enabled = esp32Enabled;
+        lastESP32Enabled = false;
         lastESP32EnabledValid = true;
     }
 #endif
@@ -348,6 +371,24 @@ void FightpadESP32ProxyAddon::setup()
     } else {
         uart_set_hw_flow(uart, false, false);
     }
+
+#if FIGHTPAD12SLIM_ESP32_PROXY_ENABLE_FOLLOWS_TRANSPORT
+    // Arm the RP2350 UART receiver before enabling the ESP32-C6. The C6 sends
+    // its FI firmware-information sequence only once during boot; enabling it
+    // before uart_init() left a race where the first frames could be lost and
+    // the OLED would remain on "Coming to soon" for the entire power cycle.
+    if (isValidPin(FIGHTPAD12SLIM_ESP32_PROXY_ENABLE_PIN)) {
+        const bool esp32Enabled = isBluetoothTransportSelected();
+        const bool outputLevel = esp32Enabled
+            ? (FIGHTPAD12SLIM_ESP32_PROXY_ENABLE_ACTIVE_LEVEL != 0)
+            : (FIGHTPAD12SLIM_ESP32_PROXY_ENABLE_ACTIVE_LEVEL == 0);
+        gpio_init(FIGHTPAD12SLIM_ESP32_PROXY_ENABLE_PIN);
+        gpio_put(FIGHTPAD12SLIM_ESP32_PROXY_ENABLE_PIN, outputLevel);
+        gpio_set_dir(FIGHTPAD12SLIM_ESP32_PROXY_ENABLE_PIN, GPIO_OUT);
+        lastESP32Enabled = esp32Enabled;
+        lastESP32EnabledValid = true;
+    }
+#endif
 
     initialized = true;
     setTransportDiagnosticPin(isBluetoothTransportSelected());
@@ -745,6 +786,11 @@ void FightpadESP32ProxyAddon::handleBluetoothProfileAckFrame(const uint8_t frame
     const FightpadBluetoothProfileAckResult result =
         static_cast<FightpadBluetoothProfileAckResult>(frame[5]);
 
+    printf("[FightpadBLE] Profile ACK: accepted=%u seq=%u result=%u\n",
+           static_cast<unsigned>(acceptedProfile),
+           static_cast<unsigned>(frame[4]),
+           static_cast<unsigned>(result));
+
     switch (result) {
     case FightpadBluetoothProfileAckResult::ActiveUnchanged:
         if (acceptedProfile != profileRequested) {
@@ -1052,7 +1098,9 @@ FightpadBluetoothProfile FightpadESP32ProxyAddon::getConfiguredBluetoothProfile(
 {
     const FightpadESP32ProxyOptions& options =
         Storage::getInstance().getAddonOptions().fightpadESP32ProxyOptions;
-    return normalizeFightpadBluetoothProfile(options.bluetoothProfile);
+    return options.has_bluetoothProfile
+        ? normalizeFightpadBluetoothProfile(options.bluetoothProfile)
+        : FightpadBluetoothProfile::Xbox;
 }
 
 void FightpadESP32ProxyAddon::beginBluetoothProfileRequest(FightpadBluetoothProfile profile)
@@ -1099,6 +1147,13 @@ void FightpadESP32ProxyAddon::sendBluetoothProfileModeFrame(bool force)
 
     writeUartFrame(frame);
     profileLastSendMs = now;
+
+    if (force) {
+        printf("[FightpadBLE] Profile Mode TX: profile=%u seq=%u flags=0x%02x\n",
+               static_cast<unsigned>(profileRequested),
+               static_cast<unsigned>(profileRequestSequence),
+               static_cast<unsigned>(frame[5]));
+    }
 }
 
 void FightpadESP32ProxyAddon::updateBluetoothProfileSync(bool force)
@@ -1129,6 +1184,13 @@ void FightpadESP32ProxyAddon::updateBluetoothProfileSync(bool force)
     }
 
     if (!bluetoothSelected) {
+        return;
+    }
+
+    if (isFightpadBluetoothProfileSavePending()) {
+        // The menu has changed the protobuf object in RAM, but GP2040 has not
+        // yet confirmed the forced flash save. Never send that transient value
+        // to C6 because a power cycle would restore the previous Profile.
         return;
     }
 

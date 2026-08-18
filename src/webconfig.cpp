@@ -2494,33 +2494,115 @@ std::string getHeldPins()
         }
     }
 
-    std::set<uint> heldPinsSet;
-    uint32_t startTime = getMillis();
-    uint32_t oldState = ~gpio_get_all();
-    uint32_t debounceTime = 0;
-    bool isAnyPinHeld = false;
+    constexpr uint32_t captureTimeoutMs = 5000;
+    constexpr uint32_t rawFilterMs = 30;
+    constexpr uint32_t stateDebounceMs = 30;
 
-    // Monitor pins for 5 seconds or until released
-    while (!_abortGetHeldPins && (isAnyPinHeld || (getMillis() - startTime) < 5000)) {
+    // Only core/unassigned input pins are valid mapping candidates. Add-on and
+    // reserved inputs (for example Fightpad's USB/BT selector) must not end a
+    // capture request when their state changes.
+    const GpioMappingInfo* gpioMappings = Storage::getInstance().getGpioMappings().pins;
+    uint64_t eligiblePinsMask = 0;
+    for (uint32_t pin = 0; pin < NUM_BANK0_GPIOS; pin++) {
+        if (gpioMappings[pin].action != GpioAction::ASSIGNED_TO_ADDON &&
+            gpioMappings[pin].action != GpioAction::RESERVED &&
+            gpio_get_function(pin) == GPIO_FUNC_SIO &&
+            !gpio_is_dir_out(pin)) {
+            eligiblePinsMask |= (uint64_t{1} << pin);
+        }
+    }
+
+    const auto getPressedPins = [eligiblePinsMask]() -> uint64_t {
+        // GP2040-CE button inputs are active-low.
+        return (~gpio_get_all64()) & eligiblePinsMask;
+    };
+
+    // Match the proven GP30 strategy: a 30ms raw-input filter feeds a state
+    // machine that separately confirms the press and release for another
+    // 30ms. A bounce always rolls the state back instead of producing a
+    // second capture.
+    enum class CaptureState : uint8_t {
+        WAIT_PRESS,
+        DEBOUNCE_PRESS,
+        PRESSED,
+        DEBOUNCE_RELEASE,
+    };
+
+    std::set<uint> heldPinsSet;
+    const uint32_t captureStart = getMillis();
+    uint64_t filterRawPins = getPressedPins();
+    uint64_t filteredPins = 0;
+    uint32_t filterStart = captureStart;
+    uint64_t capturedPins = 0;
+    uint32_t stateTimer = captureStart;
+    CaptureState captureState = CaptureState::WAIT_PRESS;
+    bool captureComplete = false;
+
+    // Preserve the original five-second window while waiting for a press.
+    // Once a press is accepted, finish its release cycle before returning.
+    while (!_abortGetHeldPins && !captureComplete) {
         rndis_task();
 
-        uint32_t newState = ~gpio_get_all();
-        if (isAnyPinHeld && newState == oldState) break; // Pins released
+        const uint32_t currentTime = getMillis();
+        const uint64_t sampledPins = getPressedPins();
+        const bool trackingRelease =
+            captureState == CaptureState::PRESSED ||
+            captureState == CaptureState::DEBOUNCE_RELEASE;
+        const uint64_t rawPins = trackingRelease
+            ? (sampledPins & capturedPins)
+            : sampledPins;
 
-        uint32_t changedPins = newState ^ oldState;
-        uint32_t currentTime = getMillis();
+        // Layer 1: sliding-window raw GPIO filter, identical in principle to
+        // ScrollWheelMenuAddon::updateButton() for GP30.
+        if (rawPins != filterRawPins) {
+            filterRawPins = rawPins;
+            filterStart = currentTime;
+        }
+        if ((currentTime - filterStart) >= rawFilterMs) {
+            filteredPins = filterRawPins;
+        }
 
-        for (uint32_t pin = 0; pin < NUM_BANK0_GPIOS; pin++) {
-            if ((changedPins & (1 << pin)) &&
-                gpio_get_function(pin) == GPIO_FUNC_SIO &&
-                !gpio_is_dir_out(pin)) {
-
-                if (debounceTime == 0) debounceTime = currentTime;
-                if ((currentTime - debounceTime) > 5) { // 5ms debounce
-                    heldPinsSet.insert(pin);
-                    isAnyPinHeld = true;
+        // Layer 2: press/release state machine. It reads only filteredPins.
+        switch (captureState) {
+            case CaptureState::WAIT_PRESS:
+                if ((currentTime - captureStart) >= captureTimeoutMs) {
+                    captureComplete = true;
+                } else if (filteredPins != 0) {
+                    capturedPins = filteredPins;
+                    stateTimer = currentTime;
+                    captureState = CaptureState::DEBOUNCE_PRESS;
                 }
-            }
+                break;
+
+            case CaptureState::DEBOUNCE_PRESS:
+                if ((filteredPins & capturedPins) != capturedPins) {
+                    capturedPins = 0;
+                    captureState = CaptureState::WAIT_PRESS;
+                } else if ((currentTime - stateTimer) >= stateDebounceMs) {
+                    captureState = CaptureState::PRESSED;
+                }
+                break;
+
+            case CaptureState::PRESSED:
+                if ((filteredPins & capturedPins) == 0) {
+                    stateTimer = currentTime;
+                    captureState = CaptureState::DEBOUNCE_RELEASE;
+                }
+                break;
+
+            case CaptureState::DEBOUNCE_RELEASE:
+                if ((filteredPins & capturedPins) != 0) {
+                    captureState = CaptureState::PRESSED;
+                } else if ((currentTime - stateTimer) >= stateDebounceMs) {
+                    captureComplete = true;
+                }
+                break;
+        }
+    }
+
+    for (uint32_t pin = 0; pin < NUM_BANK0_GPIOS; pin++) {
+        if (capturedPins & (uint64_t{1} << pin)) {
+            heldPinsSet.insert(pin);
         }
     }
 

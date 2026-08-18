@@ -155,8 +155,33 @@
 ### 当前传输控制器类型统一显示
 - 物理硬件: 无新增硬件，复用 GP33 传输选择、RP2350↔ESP32-C6 UART0 和现有 OLED
 - 功能: USB挡位按RP2350 InputMode和上游原始标签显示，BT挡位按C6 `FA` ACK确认的
-  BLE Profile显示；BLE Xbox使用`XINPUT`、BLE PS5使用`PS5`，并同步输入历史按钮命名
+  BLE Profile显示；BLE Xbox使用`XINPUT`、BLE PS4使用`PS4`、BLE Switch使用`SWITCH`，并同步输入历史按钮命名
 - 讨论ID: `2026-08-13-active-transport-controller-label`
+
+### BLE Profile强制持久化与同步门控
+- 物理硬件: 无新增硬件，复用RP2350 Flash、拨轮菜单和RP2350到ESP32-C6 UART0
+- 功能: Bluetooth Type选择使用强制保存但不重启RP2350；Flash成功后才允许发送Mode，失败时恢复旧RAM值并显示Save Failed，保持USB InputMode与BLE Profile独立
+- 讨论ID: `2026-08-13-ble-profile-persistence`
+
+### Switch BLE Profile 4
+- 物理硬件: 无新增硬件，复用RP2350到ESP32-C6 UART0、Bluetooth Type菜单和现有OLED
+- 功能: 在旧Profile编号不变的前提下追加Switch=4，菜单选择后复用现有强制保存、Mode/ACK、C6独立重启和多Profile Bond隔离流程
+- 讨论ID: `2026-08-17-switch-ble-profile-4`
+
+### BLE控制器选择后返回主页面
+- 物理硬件: 无新增硬件，复用拨轮菜单、OLED和现有BLE Profile异步保存流程
+- 功能: Bluetooth Type列表确认任一Profile后立即退出拨轮菜单并恢复BUTTONS页面，保存和C6同步提示继续异步执行
+- 讨论ID: `2026-08-17-ble-profile-return-buttons`
+
+### BLE控制器菜单精简
+- 物理硬件: 无新增硬件，复用Bluetooth Type菜单和现有BLE Profile协议
+- 功能: 量产菜单隐藏Keyboard入口并将PS4 BLE (PC)标签统一简化为PS BLE；Profile 2/3编号和旧配置兼容保持不变
+- 讨论ID: `2026-08-17-ble-menu-trim`
+
+### BLE控制器切换可见重启
+- 物理硬件: 无新增硬件，复用RP2350 watchdog重启、OLED启动Logo和RGB黑屏反馈
+- 功能: Bluetooth Type实际变化并保存后执行与USB Controller Type相同的500ms黑屏和RP2350重启；相同Profile不重启
+- 讨论ID: `2026-08-17-ble-profile-visible-reboot`
 
 ## 开发步骤状态
 
@@ -305,4 +330,20 @@
 | S42-A | 发布已消抖BT挡位与C6 ACK确认Profile的跨核快照 | completed | 2026-08-13-active-transport-controller-label |
 | S42-B | BUTTONS主页面和输入历史按当前传输显示类型并保留USB原始标签 | completed | 2026-08-13-active-transport-controller-label |
 | S42-C | ACK前回退、USB/BT隔离、标签映射和差异非编译静态验证 | completed | 2026-08-13-active-transport-controller-label |
-| S42-D | RP2350构建烧录与USB/BT Xbox/PS5主页面实机验证 | pending | 2026-08-13-active-transport-controller-label |
+| S42-D | RP2350构建烧录与USB/BT Xbox/PS4/Switch主页面实机验证 | pending | 2026-08-13-active-transport-controller-label |
+| S43-A | BLE Profile强制保存且不重启RP2350 | completed | 2026-08-13-ble-profile-persistence |
+| S43-B | 保存完成前Mode同步门控及失败回滚与OLED提示 | completed | 2026-08-13-ble-profile-persistence |
+| S43-C | has有效位、USB/BLE独立、APPLY_NOW和XOR向量静态验证 | completed | 2026-08-13-ble-profile-persistence |
+| S43-D | PS/Xbox切换、普通重启、超时和USB/BLE独立实机验证 | pending | 2026-08-13-ble-profile-persistence |
+| S44-A | Profile 4公共枚举、合法范围、标签和Bluetooth Type菜单接入 | completed | 2026-08-17-switch-ble-profile-4 |
+| S44-B | Proxy、配置存储、ACK及主页面Switch/PS4显示路径审计补齐 | completed | 2026-08-17-switch-ble-profile-4 |
+| S44-C | 主协议文档、固定UART向量和非编译静态验证 | completed | 2026-08-17-switch-ble-profile-4 |
+| S44-D | 用户双固件构建烧录、Switch配对重连和多Profile Bond回归 | pending | 2026-08-17-switch-ble-profile-4 |
+| S45-A | Bluetooth Type确认后复用菜单退出路径返回BUTTONS页面 | completed | 2026-08-17-ble-profile-return-buttons |
+| S45-B | 用户构建烧录并验证保存、提示覆盖和菜单输入解锁 | pending | 2026-08-17-ble-profile-return-buttons |
+| S46-A | Bluetooth Type隐藏Keyboard入口并将PS标签改为PS BLE | completed | 2026-08-17-ble-menu-trim |
+| S46-B | Profile 2/3协议编号、旧配置和菜单计数非编译静态验证 | completed | 2026-08-17-ble-menu-trim |
+| S46-C | 用户重新构建烧录并验证菜单与切换提示 | pending | 2026-08-17-ble-menu-trim |
+| S47-A | BLE Profile变化复用USB模式黑屏、强制保存和RP2350重启路径 | completed | 2026-08-17-ble-profile-visible-reboot |
+| S47-B | 保存顺序、Proxy同步窗口、相同Profile不重启和文档静态验证 | completed | 2026-08-17-ble-profile-visible-reboot |
+| S47-C | 用户构建烧录并验证启动Logo、C6切换及Bond恢复 | pending | 2026-08-17-ble-profile-visible-reboot |

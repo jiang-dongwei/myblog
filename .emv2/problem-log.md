@@ -2,6 +2,36 @@
 
 ## 当前问题
 
+### [2026-08-13] PS5 USB环境下BLE Profile只改RAM未可靠落盘
+
+- **状态**: retest_pending
+- **步骤**: S43-D
+- **发现时间**: 2026-08-13
+- **相关HVR**: -
+- **描述**: PS蓝牙切换到Xbox后当次可配对，但Xbox配对成功再关机重启会重新进入配对并最终回到PS。
+
+### 分析
+
+- Bluetooth Type菜单原来触发`GPStorageSaveEvent(false)`；`Storage::save(false)`在USB Host启用、PS4/PS5驱动且需要认证时直接拒绝保存。
+- 菜单已经同时写入`has_bluetoothProfile=true`和目标值，但失败结果未被使用，Proxy仍可能把仅存在RAM的新Profile发送给C6。
+- 重启后RP2350从Flash读回旧PS并发给已保存Xbox的C6，C6将其视为真实Profile变化，因此清理不兼容bond并重新配对。
+
+### 解决方案
+
+- BLE Profile菜单改用`GPStorageSaveEvent(true, false)`，仅对此明确配置动作强制落盘且不重启RP2350。
+- 增加保存进行中门控，Proxy在Flash结果未知时不发送目标Mode；成功后下一轮同步，失败则恢复旧`has_`和值并显示`Save Failed`。
+- 启动配置读取检查`has_bluetoothProfile`，缺失时使用独立Xbox默认值；不读取USB`inputMode`。
+- 普通Mode帧继续只使用`APPLY_NOW=0x01`，不发送`FORCE_REPAIR`。
+
+### 闭环记录
+
+- **解决日期**: -
+- **解决方案**: 源码与静态验证完成，等待用户构建烧录及四场景实测
+- **验证方式**: PS->Xbox、Xbox普通重启、30秒超时、USB PS5/BLE Xbox独立性
+- **证据**: `docs/ESP32C6_BLE_PROFILE_HANDOFF.md`
+
+---
+
 ### [2026-08-12] 多 BLE Profile 改造后 GPIO13 配对无 Pairing
 
 - **状态**: handoff_ready

@@ -1,5 +1,6 @@
 #include "addons/scrollwheel_menu.h"
 #include "addons/fightpad_ble_profile.h"
+#include "addons/fightpad_esp32_proxy.h"
 #include "gamepad.h"
 #include "helper.h"
 #include "storagemanager.h"
@@ -81,8 +82,8 @@ const SWMenuItem kMenuMain[] = {
     { "Battery Info",       SWMenuLevel::BATTERY_INFO, 0 },
 #endif
     { "RGB Customize",      SWMenuLevel::RGB_SUB, 0 },
-    { "Controller Type",    SWMenuLevel::CONTROLLER_TYPE, 0 },
-    { "Bluetooth Type",     SWMenuLevel::BLUETOOTH_TYPE, 0 },
+    { "USB Controller",     SWMenuLevel::CONTROLLER_TYPE, 0 },
+    { "BLE Controller",     SWMenuLevel::BLUETOOTH_TYPE, 0 },
 };
 const uint8_t kMenuMainCount = sizeof(kMenuMain) / sizeof(kMenuMain[0]);
 
@@ -100,12 +101,11 @@ const SWMenuItem kMenuControllerTypes[] = {
 };
 const uint8_t kMenuControllerTypesCount =
     sizeof(kMenuControllerTypes) / sizeof(kMenuControllerTypes[0]);
-
 const SWMenuItem kMenuBluetoothTypes[] = {
     { "XBOX BLE",     SWMenuLevel::INFO, static_cast<uint8_t>(FightpadBluetoothProfile::Xbox) },
     { "GENERIC BLE",  SWMenuLevel::INFO, static_cast<uint8_t>(FightpadBluetoothProfile::Generic) },
-    { "KEYBOARD BLE", SWMenuLevel::INFO, static_cast<uint8_t>(FightpadBluetoothProfile::Keyboard) },
-    { "PS5 BLE (PC)", SWMenuLevel::INFO, static_cast<uint8_t>(FightpadBluetoothProfile::PS5PC) },
+    { "PS BLE",        SWMenuLevel::INFO, static_cast<uint8_t>(FightpadBluetoothProfile::PS5PC) },
+    { "SWITCH BLE",    SWMenuLevel::INFO, static_cast<uint8_t>(FightpadBluetoothProfile::Switch) },
 };
 const uint8_t kMenuBluetoothTypesCount =
     sizeof(kMenuBluetoothTypes) / sizeof(kMenuBluetoothTypes[0]);
@@ -136,6 +136,23 @@ const SWMenuItem kMenuColors[] = {
 };
 const uint8_t kMenuColorsCount = sizeof(kMenuColors) / sizeof(kMenuColors[0]);
 
+// Chase uses the same fixed AnimationStation colors as the other shared
+// effects. 0xFF selects the original color-cycling Chase implementation.
+const SWMenuItem kMenuChaseColors[] = {
+    { "OFF",     SWMenuLevel::INFO, 0    },
+    { "Red",     SWMenuLevel::INFO, 2    },
+    { "Orange",  SWMenuLevel::INFO, 3    },
+    { "Yellow",  SWMenuLevel::INFO, 4    },
+    { "Green",   SWMenuLevel::INFO, 6    },
+    { "Cyan",    SWMenuLevel::INFO, 8    },
+    { "Blue",    SWMenuLevel::INFO, 10   },
+    { "Purple",  SWMenuLevel::INFO, 11   },
+    { "White",   SWMenuLevel::INFO, 1    },
+    { "Rainbow", SWMenuLevel::INFO, 0xFF },
+};
+const uint8_t kMenuChaseColorsCount =
+    sizeof(kMenuChaseColors) / sizeof(kMenuChaseColors[0]);
+
 // Unified Key/Base effect picker. targetIndex uses SWLightEffect IDs; legacy
 // Key/Base protobuf indices are translated only while loading and saving.
 const SWMenuItem kMenuLightEffects[] = {
@@ -143,7 +160,7 @@ const SWMenuItem kMenuLightEffects[] = {
     { "Gradient",     SWMenuLevel::INFO,                LIGHT_EFFECT_GRADIENT },
     { "Breathing",    SWMenuLevel::COLOR_EFFECT_BREATH, LIGHT_EFFECT_BREATHING },
     { "Rainbow",      SWMenuLevel::INFO,                LIGHT_EFFECT_RAINBOW },
-    { "Chase",        SWMenuLevel::INFO,                LIGHT_EFFECT_CHASE },
+    { "Chase",        SWMenuLevel::COLOR_EFFECT_CHASE,  LIGHT_EFFECT_CHASE },
 };
 const uint8_t kMenuLightEffectsCount = sizeof(kMenuLightEffects) / sizeof(kMenuLightEffects[0]);
 
@@ -169,6 +186,34 @@ volatile uint8_t g_menuBrightnessLevel = 0;
 volatile bool g_menuRgbPowerEnabled = true;
 volatile bool g_manualLightEffectsEnabled = true;
 volatile bool g_scrollWheelRebootBlackout = false;
+static std::atomic<bool> bluetoothProfileSavePending { false };
+static bool bluetoothProfilePreviousHasValue = false;
+static uint32_t bluetoothProfilePreviousValue = 0;
+static FightpadBluetoothProfile bluetoothProfileSaveTarget = FightpadBluetoothProfile::Xbox;
+
+bool isFightpadBluetoothProfileSavePending() {
+    return bluetoothProfileSavePending.load(std::memory_order_acquire);
+}
+
+void handleFightpadBluetoothProfileSaveResult(bool successful) {
+    if (!bluetoothProfileSavePending.exchange(false, std::memory_order_acq_rel)) {
+        return;
+    }
+
+    FightpadESP32ProxyOptions& options =
+        Storage::getInstance().getAddonOptions().fightpadESP32ProxyOptions;
+
+    if (!successful) {
+        // Do not let the proxy synchronize a value which exists only in RAM.
+        options.has_bluetoothProfile = bluetoothProfilePreviousHasValue;
+        options.bluetoothProfile = bluetoothProfilePreviousValue;
+        publishFightpadESP32BluetoothProfileSaveFailed(bluetoothProfileSaveTarget);
+    }
+
+    printf("[FightpadBLE] Profile save result: %s profile=%u\n",
+           successful ? "success" : "failure",
+           static_cast<unsigned>(bluetoothProfileSaveTarget));
+}
 
 bool isScrollWheelGameplayInputLocked() {
     return gameplayInputLockState != GameplayInputLockState::UNLOCKED;
@@ -282,6 +327,7 @@ const SWMenuItem* ScrollWheelMenuAddon::currentMenuTable() const {
         case SWMenuLevel::COLOR_EFFECT:
         case SWMenuLevel::COLOR_EFFECT_BREATH:
                                              return kMenuColors;
+        case SWMenuLevel::COLOR_EFFECT_CHASE:return kMenuChaseColors;
         case SWMenuLevel::LIGHT_EFFECT:   return kMenuLightEffects;
         case SWMenuLevel::BRIGHTNESS:     return kMenuBrightness;
         case SWMenuLevel::CONTROLLER_TYPE:return kMenuControllerTypes;
@@ -299,6 +345,7 @@ uint8_t ScrollWheelMenuAddon::currentItemCount() const {
         case SWMenuLevel::COLOR_EFFECT:
         case SWMenuLevel::COLOR_EFFECT_BREATH:
                                              return kMenuColorsCount;
+        case SWMenuLevel::COLOR_EFFECT_CHASE:return kMenuChaseColorsCount;
         case SWMenuLevel::LIGHT_EFFECT:   return kMenuLightEffectsCount;
         case SWMenuLevel::BRIGHTNESS:     return kMenuBrightnessCount;
         case SWMenuLevel::CONTROLLER_TYPE:return kMenuControllerTypesCount;
@@ -336,6 +383,7 @@ static void clampScrollOffset() {
         case SWMenuLevel::COLOR_EFFECT:
         case SWMenuLevel::COLOR_EFFECT_BREATH:
                                              count = kMenuColorsCount; break;
+        case SWMenuLevel::COLOR_EFFECT_CHASE:count = kMenuChaseColorsCount; break;
         case SWMenuLevel::LIGHT_EFFECT:   count = kMenuLightEffectsCount; break;
         case SWMenuLevel::BRIGHTNESS:     count = kMenuBrightnessCount; break;
         case SWMenuLevel::CONTROLLER_TYPE:count = kMenuControllerTypesCount; break;
@@ -438,16 +486,21 @@ void ScrollWheelMenuAddon::navSelect() {
         return;
     }
 
-    // Shared effect color pickers apply to both GP22 and GP40. Static Color
-    // and Breathing differ only in which unified effect is selected.
+    // Shared effect color pickers apply to both GP22 and GP40. Chase adds a
+    // 0xFF Rainbow choice which preserves the original color-cycling effect.
     if (currentLevel == SWMenuLevel::COLOR_EFFECT ||
-        currentLevel == SWMenuLevel::COLOR_EFFECT_BREATH) {
+        currentLevel == SWMenuLevel::COLOR_EFFECT_BREATH ||
+        currentLevel == SWMenuLevel::COLOR_EFFECT_CHASE) {
         const SWMenuItem* table = currentMenuTable();
         uint8_t colorIdx = table[idx].targetIndex;
         g_menuRgbEffectColor = colorIdx;
-        g_menuLightEffect = (currentLevel == SWMenuLevel::COLOR_EFFECT)
-            ? LIGHT_EFFECT_STATIC_COLOR
-            : LIGHT_EFFECT_BREATHING;
+        if (currentLevel == SWMenuLevel::COLOR_EFFECT) {
+            g_menuLightEffect = LIGHT_EFFECT_STATIC_COLOR;
+        } else if (currentLevel == SWMenuLevel::COLOR_EFFECT_BREATH) {
+            g_menuLightEffect = LIGHT_EFFECT_BREATHING;
+        } else {
+            g_menuLightEffect = LIGHT_EFFECT_CHASE;
+        }
         if (colorIdx != 0) {
             g_menuRgbPowerEnabled = true;
             g_manualLightEffectsEnabled = true;
@@ -501,9 +554,10 @@ void ScrollWheelMenuAddon::navSelect() {
     }
 
     // Bluetooth Type is independent from the wired USB InputMode. Persist the
-    // product selection without rebooting RP2350; FightpadESP32ProxyAddon
-    // observes the option and synchronizes it only while BT transport is active.
-    if (currentLevel == SWMenuLevel::BLUETOOTH_TYPE) {·
+    // product selection, then reboot RP2350 with the same visible blackout used
+    // by Controller Type. The proxy can sync C6 during the reboot delay or after
+    // the new RP2350 boot while BT transport is active.
+    if (currentLevel == SWMenuLevel::BLUETOOTH_TYPE) {
         const SWMenuItem* table = currentMenuTable();
         const uint8_t selectedProfile = table[idx].targetIndex;
         FightpadESP32ProxyOptions& options =
@@ -511,11 +565,23 @@ void ScrollWheelMenuAddon::navSelect() {
         if (isValidFightpadBluetoothProfile(selectedProfile) &&
             (!options.has_bluetoothProfile ||
              options.bluetoothProfile != selectedProfile)) {
+            bluetoothProfilePreviousHasValue = options.has_bluetoothProfile;
+            bluetoothProfilePreviousValue = options.bluetoothProfile;
+            bluetoothProfileSaveTarget =
+                static_cast<FightpadBluetoothProfile>(selectedProfile);
             options.has_bluetoothProfile = true;
             options.bluetoothProfile = selectedProfile;
-            EventManager::getInstance().triggerEvent(new GPStorageSaveEvent(false));
+            bluetoothProfileSavePending.store(true, std::memory_order_release);
+
+            printf("[FightpadBLE] Profile menu selected: profile=%u has=%u\n",
+                   static_cast<unsigned>(selectedProfile),
+                   options.has_bluetoothProfile ? 1u : 0u);
+            printf("[FightpadBLE] Profile save requested: force=1 restart=1\n");
+            g_scrollWheelRebootBlackout = true;
+            EventManager::getInstance().triggerEvent(new GPStorageSaveEvent(true, true));
         }
-        markMenuDirty();
+        // Return to BUTTONS immediately; the pending save/reboot continues.
+        navToggle();
         return;
     }
 
@@ -558,6 +624,22 @@ void ScrollWheelMenuAddon::navSelect() {
         } else if (target == SWMenuLevel::LIGHT_EFFECT &&
                    g_menuLightEffect < kMenuLightEffectsCount) {
             g_menuState.index = g_menuLightEffect;
+        } else if (target == SWMenuLevel::COLOR_EFFECT ||
+                   target == SWMenuLevel::COLOR_EFFECT_BREATH ||
+                   target == SWMenuLevel::COLOR_EFFECT_CHASE) {
+            const SWMenuItem* colorTable = (target == SWMenuLevel::COLOR_EFFECT_CHASE)
+                ? kMenuChaseColors
+                : kMenuColors;
+            const uint8_t colorCount = (target == SWMenuLevel::COLOR_EFFECT_CHASE)
+                ? kMenuChaseColorsCount
+                : kMenuColorsCount;
+            g_menuState.index = 0;
+            for (uint8_t i = 0; i < colorCount; i++) {
+                if (colorTable[i].targetIndex == g_menuRgbEffectColor) {
+                    g_menuState.index = i;
+                    break;
+                }
+            }
         } else if (target == SWMenuLevel::CONTROLLER_TYPE) {
             const uint8_t currentMode = static_cast<uint8_t>(
                 Storage::getInstance().getGamepadOptions().inputMode);
@@ -652,6 +734,13 @@ void ScrollWheelMenuAddon::navBack() {
         // Back to LIGHT_EFFECT (Breathing = index 2)
         g_menuState.level = static_cast<uint8_t>(SWMenuLevel::LIGHT_EFFECT);
         g_menuState.index = 2;
+        g_menuState.scrollOffset = 0;
+        markMenuDirty();
+        break;
+    case SWMenuLevel::COLOR_EFFECT_CHASE:
+        // Back to LIGHT_EFFECT (Chase = index 4)
+        g_menuState.level = static_cast<uint8_t>(SWMenuLevel::LIGHT_EFFECT);
+        g_menuState.index = 4;
         g_menuState.scrollOffset = 0;
         markMenuDirty();
         break;

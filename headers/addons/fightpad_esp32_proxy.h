@@ -205,6 +205,7 @@ enum class FightpadESP32BluetoothProfileStatus : uint8_t {
     PairAgain = 2,
     ProtocolError = 3,
     Timeout = 4,
+    SaveFailed = 5,
 };
 
 struct FightpadESP32BluetoothProfileEvent {
@@ -219,6 +220,7 @@ bool getFightpadESP32BluetoothProfileEvent(FightpadESP32BluetoothProfileEvent& e
 bool isFightpadESP32BluetoothProfileEventActive(
     const FightpadESP32BluetoothProfileEvent& event,
     uint32_t now);
+void publishFightpadESP32BluetoothProfileSaveFailed(FightpadBluetoothProfile profile);
 
 // Returns a profile only while the debounced transport selector is in BT mode
 // and ESP32-C6 has acknowledged that profile. Core1 display code uses this

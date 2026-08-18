@@ -7,7 +7,9 @@ enum class FightpadBluetoothProfile : uint8_t {
     Generic = 0,
     Xbox = 1,
     Keyboard = 2,
+    // UART Profile value 3 is retained for compatibility; it now selects the PS4-compatible BLE Profile.
     PS5PC = 3,
+    Switch = 4,
 };
 
 enum class FightpadBluetoothProfileAckResult : uint8_t {
@@ -25,7 +27,7 @@ static constexpr uint8_t FIGHTPAD_BLE_PROFILE_FLAG_FORCE_REPAIR = 0x02;
 
 static constexpr bool isValidFightpadBluetoothProfile(uint8_t value)
 {
-    return value <= static_cast<uint8_t>(FightpadBluetoothProfile::PS5PC);
+    return value <= static_cast<uint8_t>(FightpadBluetoothProfile::Switch);
 }
 
 static constexpr FightpadBluetoothProfile normalizeFightpadBluetoothProfile(uint32_t value)
@@ -40,7 +42,8 @@ static inline const char* getFightpadBluetoothProfileLabel(FightpadBluetoothProf
     switch (profile) {
     case FightpadBluetoothProfile::Xbox:     return "XBOX BLE";
     case FightpadBluetoothProfile::Keyboard: return "KEYBOARD BLE";
-    case FightpadBluetoothProfile::PS5PC:    return "PS5 BLE (PC)";
+    case FightpadBluetoothProfile::PS5PC:    return "PS BLE";
+    case FightpadBluetoothProfile::Switch:   return "SWITCH BLE";
     case FightpadBluetoothProfile::Generic:
     default:                                 return "GENERIC BLE";
     }

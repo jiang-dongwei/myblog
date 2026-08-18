@@ -869,3 +869,69 @@ Base Effect 和 Key Effect 都需要同时提供两个呼吸灯入口：
 ### 讨论ID
 
 `2026-08-13-active-transport-controller-label`
+
+## 2026-08-13: BLE Profile强制持久化与同步门控 (S43)
+
+- C6侧协作任务书确认实机故障链：PS5 USB认证环境下菜单原用`GPStorageSaveEvent(false)`，会被`Storage::save(false)`保护拒绝，导致Xbox只存在RAM；重启后旧PS从Flash回灌C6并触发真实Profile变化和重新配对。
+- Bluetooth Type改为`GPStorageSaveEvent(true, false)`：只对此用户明确配置强制写Flash，不重启RP2350，也不修改全局Storage保存策略。
+- 菜单仍同时设置`has_bluetoothProfile=true`和`bluetoothProfile`；Proxy启动读取增加`has_`检查，缺失时使用独立Xbox默认值，不读取USB`GamepadOptions.inputMode`。
+- 新增Core0保存进行中门控；Proxy在Flash结果未知时不发送RAM目标值。保存成功后自动继续现有Mode同步，失败时恢复旧`has_`和值、记录一次日志并在OLED显示`Save Failed`。
+- `GP2040::checkSaveRebootState()`开始保存并使用`Storage::save()`返回值，但只有存在BLE Profile pending时才执行BLE回滚/提示，其他保存行为不变。
+- 增加菜单选择、保存请求/结果、启动配置、首次Mode TX和ACK的单次日志；没有放入主循环刷屏路径。
+- 普通Mode帧继续固定`APPLY_NOW=0x01`，未使用`FORCE_REPAIR`。Xbox示例`46 4D 01 01 01 01 00 0B`的XOR校验为`0B`。
+- 修改范围的`git diff --check`通过；按仓库约定未运行GP2040-CE构建或烧录，S43-D等待用户实机验证。
+
+### 讨论ID
+
+`2026-08-13-ble-profile-persistence`
+
+## 2026-08-17: Switch BLE Profile 4 RP2350协同 (S44)
+
+- `docs/ESP32C6_SWITCH_BLE_PROFILE_RP2350_HANDOFF.md` 已覆盖需求、协议、硬件边界、风险和联调步骤，作为本轮已确认讨论依据。
+- 保持 Generic=0、Xbox=1、Keyboard=2、PS5PC=3 不变，只在末尾追加 Switch=4；Profile 3当前标签为PS4兼容BLE。
+- `isValidFightpadBluetoothProfile()` 扩展到0..4，菜单通过`targetIndex`显式发送4；protobuf字段号、默认值和存储类型不变。
+- Proxy继续复用现有Mode/ACK、sequence、250ms重试、2秒超时、强制保存成功后同步和失败回滚路径，没有新增Switch专属状态机。
+- 补齐主页面BLE显示：Profile 3显示PS4布局，Profile 4显示SWITCH并使用Switch按钮布局；有线USB InputMode和驱动未修改。
+- 主协议文档同步Profile 0..4、Switch固定测试向量、多Profile独立Bond和回归场景。
+- 按仓库约定未运行编译；S44-D等待用户构建、烧录并完成双固件实机联调。
+
+### 讨论ID
+
+`2026-08-17-switch-ble-profile-4`
+
+## 2026-08-17: BLE控制器选择后返回主页面 (S45)
+
+- Bluetooth Type列表短按确认后不再停留在选择界面，统一调用现有`navToggle()`退出菜单并恢复BUTTONS页面。
+- Profile值写入RAM、强制Flash保存、保存成功后Proxy同步、C6 Mode/ACK和重启流程保持原样且继续异步执行。
+- Applying、Pairing和Save Failed仍通过现有OLED临时覆盖层显示；无需让菜单等待保存或ACK。
+- 选择当前相同Profile也会退出列表，符合“完成一次选择即返回主页面”的交互行为。
+- 按仓库约定未运行编译；S45-B等待用户构建烧录并验证菜单输入锁释放和提示显示。
+
+### 讨论ID
+
+`2026-08-17-ble-profile-return-buttons`
+
+## 2026-08-17: BLE控制器菜单精简 (S46)
+
+- Bluetooth Type菜单删除Keyboard入口，保留Xbox、Generic、PS和Switch四个量产选项；菜单计数继续由数组大小自动计算。
+- Profile 2 Keyboard仍保留在公共枚举、合法范围、UART Mode/ACK和配置读取中，避免已保存数值2失效。
+- Profile 3内部枚举`PS5PC`和值3保持不变，菜单与Profile切换提示统一显示`PS BLE`。
+- BUTTONS主页面的紧凑当前类型仍显示`PS4`，本轮只修改用户指定的BLE Controller菜单及其切换提示。
+- 上一次构建在用户中断后不视为有效产物；本轮按仓库约定未重新编译。
+
+### 讨论ID
+
+`2026-08-17-ble-menu-trim`
+
+## 2026-08-17: BLE控制器切换可见重启 (S47)
+
+- Bluetooth Type实际变化时将保存事件从`GPStorageSaveEvent(true, false)`改为`GPStorageSaveEvent(true, true)`，与USB Controller Type一致。
+- 保存请求前置位RAM-only `g_scrollWheelRebootBlackout`，两条灯链立即写入黑帧；约500ms后RP2350 watchdog重启并显示现有启动Logo。
+- `checkSaveRebootState()`先执行`Storage::save()`和BLE保存结果处理，再启动重启倒计时，确保Flash提交先于重启。
+- 保存成功后Proxy可在500ms窗口内同步C6；即使尚未完成，RP2350新启动也会从Flash读取目标Profile并重新同步。
+- 选择当前相同Profile不会创建保存事件、不会置位黑屏也不会重启，只退出列表返回BUTTONS页面。
+- UART版本、Mode/ACK格式、Profile编号、C6重启职责和Bond隔离不变；本轮未运行编译。
+
+### 讨论ID
+
+`2026-08-17-ble-profile-visible-reboot`
