@@ -376,7 +376,7 @@ void FightpadESP32ProxyAddon::setup()
     // Arm the RP2350 UART receiver before enabling the ESP32-C6. The C6 sends
     // its FI firmware-information sequence only once during boot; enabling it
     // before uart_init() left a race where the first frames could be lost and
-    // the OLED would remain on "Coming to soon" for the entire power cycle.
+    // the OLED would remain on "Info Unavailable" for the entire power cycle.
     if (isValidPin(FIGHTPAD12SLIM_ESP32_PROXY_ENABLE_PIN)) {
         const bool esp32Enabled = isBluetoothTransportSelected();
         const bool outputLevel = esp32Enabled

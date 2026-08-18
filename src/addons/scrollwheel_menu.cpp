@@ -76,45 +76,45 @@ uint8_t lightEffectToLegacyAmbientEffect(uint8_t effect) {
 } // namespace
 
 const SWMenuItem kMenuMain[] = {
-    { "RP2350B FW Version", SWMenuLevel::INFO, 0 },
-    { "ESP32C6 Status",     SWMenuLevel::INFO, 0 },
+    { "Device Info",        SWMenuLevel::INFO, 0 },
+    { "Bluetooth Info",     SWMenuLevel::INFO, 0 },
 #if SCROLLWHEEL_BATTERY_INFO_MENU_ENABLED
-    { "Battery Info",       SWMenuLevel::BATTERY_INFO, 0 },
+    { "Battery Details",    SWMenuLevel::BATTERY_INFO, 0 },
 #endif
-    { "RGB Customize",      SWMenuLevel::RGB_SUB, 0 },
-    { "USB Controller",     SWMenuLevel::CONTROLLER_TYPE, 0 },
-    { "BLE Controller",     SWMenuLevel::BLUETOOTH_TYPE, 0 },
+    { "Lighting",           SWMenuLevel::RGB_SUB, 0 },
+    { "USB Mode",           SWMenuLevel::CONTROLLER_TYPE, 0 },
+    { "Bluetooth Mode",     SWMenuLevel::BLUETOOTH_TYPE, 0 },
 };
 const uint8_t kMenuMainCount = sizeof(kMenuMain) / sizeof(kMenuMain[0]);
 
 // Keep this list limited to input modes implemented by upstream GP2040-CE.
 // Arcade Stick is an InputModeDeviceType, not a standalone USB InputMode.
 const SWMenuItem kMenuControllerTypes[] = {
-    { "XBOX",        SWMenuLevel::INFO, INPUT_MODE_XINPUT },
-    { "PS3",         SWMenuLevel::INFO, INPUT_MODE_PS3 },
-    { "PS4",         SWMenuLevel::INFO, INPUT_MODE_PS4 },
-    { "PS5",         SWMenuLevel::INFO, INPUT_MODE_PS5 },
-    { "SWITCH",      SWMenuLevel::INFO, INPUT_MODE_SWITCH },
-    { "SWITCH PRO",  SWMenuLevel::INFO, INPUT_MODE_SWITCH_PRO },
-    { "KEYBOARD",    SWMenuLevel::INFO, INPUT_MODE_KEYBOARD },
-    { "GENERIC HID", SWMenuLevel::INFO, INPUT_MODE_GENERIC },
+    { "XInput",          SWMenuLevel::INFO, INPUT_MODE_XINPUT },
+    { "PS3",             SWMenuLevel::INFO, INPUT_MODE_PS3 },
+    { "PS4",             SWMenuLevel::INFO, INPUT_MODE_PS4 },
+    { "PS5",             SWMenuLevel::INFO, INPUT_MODE_PS5 },
+    { "Switch",          SWMenuLevel::INFO, INPUT_MODE_SWITCH },
+    { "Switch Pro",      SWMenuLevel::INFO, INPUT_MODE_SWITCH_PRO },
+    { "Keyboard",        SWMenuLevel::INFO, INPUT_MODE_KEYBOARD },
+    { "Generic Gamepad", SWMenuLevel::INFO, INPUT_MODE_GENERIC },
 };
 const uint8_t kMenuControllerTypesCount =
     sizeof(kMenuControllerTypes) / sizeof(kMenuControllerTypes[0]);
 const SWMenuItem kMenuBluetoothTypes[] = {
-    { "XBOX BLE",     SWMenuLevel::INFO, static_cast<uint8_t>(FightpadBluetoothProfile::Xbox) },
-    { "GENERIC BLE",  SWMenuLevel::INFO, static_cast<uint8_t>(FightpadBluetoothProfile::Generic) },
-    { "PS BLE",        SWMenuLevel::INFO, static_cast<uint8_t>(FightpadBluetoothProfile::PS5PC) },
-    { "SWITCH BLE",    SWMenuLevel::INFO, static_cast<uint8_t>(FightpadBluetoothProfile::Switch) },
+    { "Xbox",             SWMenuLevel::INFO, static_cast<uint8_t>(FightpadBluetoothProfile::Xbox) },
+    { "Standard Gamepad", SWMenuLevel::INFO, static_cast<uint8_t>(FightpadBluetoothProfile::Generic) },
+    { "PlayStation",      SWMenuLevel::INFO, static_cast<uint8_t>(FightpadBluetoothProfile::PS5PC) },
+    { "Switch",           SWMenuLevel::INFO, static_cast<uint8_t>(FightpadBluetoothProfile::Switch) },
 };
 const uint8_t kMenuBluetoothTypesCount =
     sizeof(kMenuBluetoothTypes) / sizeof(kMenuBluetoothTypes[0]);
 
 const SWMenuItem kMenuRgbSub[] = {
-    { "Key Flash",           SWMenuLevel::COLOR,  0 },
-    { "Light Effect",        SWMenuLevel::LIGHT_EFFECT, 0 },
-    { "Brightness",          SWMenuLevel::BRIGHTNESS, 0 },
-    { "All OFF",             SWMenuLevel::INFO,   0 },  // immediate action, no sub-level
+    { "Button Flash",     SWMenuLevel::COLOR,  0 },
+    { "Lighting Effect",  SWMenuLevel::LIGHT_EFFECT, 0 },
+    { "Brightness",       SWMenuLevel::BRIGHTNESS, 0 },
+    { "Turn Lights Off",  SWMenuLevel::INFO,   0 },  // immediate action, no sub-level
 };
 const uint8_t kMenuRgbSubCount = sizeof(kMenuRgbSub) / sizeof(kMenuRgbSub[0]);
 
@@ -124,7 +124,7 @@ const uint8_t kMenuRgbSubCount = sizeof(kMenuRgbSub) / sizeof(kMenuRgbSub[0]);
 //   0=Black(OFF), 1=White, 2=Red, 3=Orange, 4=Yellow, 5=LimeGreen,
 //   6=Green, 7=Seafoam, 8=Aqua(Cyan), 9=SkyBlue, 10=Blue, 11=Purple.
 const SWMenuItem kMenuColors[] = {
-    { "OFF",    SWMenuLevel::INFO, 0  },  // ColorBlack
+    { "Off",    SWMenuLevel::INFO, 0  },  // ColorBlack
     { "Red",    SWMenuLevel::INFO, 2  },  // ColorRed
     { "Orange", SWMenuLevel::INFO, 3  },  // ColorOrange
     { "Yellow", SWMenuLevel::INFO, 4  },  // ColorYellow
@@ -139,7 +139,7 @@ const uint8_t kMenuColorsCount = sizeof(kMenuColors) / sizeof(kMenuColors[0]);
 // Chase uses the same fixed AnimationStation colors as the other shared
 // effects. 0xFF selects the original color-cycling Chase implementation.
 const SWMenuItem kMenuChaseColors[] = {
-    { "OFF",     SWMenuLevel::INFO, 0    },
+    { "Off",     SWMenuLevel::INFO, 0    },
     { "Red",     SWMenuLevel::INFO, 2    },
     { "Orange",  SWMenuLevel::INFO, 3    },
     { "Yellow",  SWMenuLevel::INFO, 4    },
@@ -165,9 +165,9 @@ const SWMenuItem kMenuLightEffects[] = {
 const uint8_t kMenuLightEffectsCount = sizeof(kMenuLightEffects) / sizeof(kMenuLightEffects[0]);
 
 const SWMenuItem kMenuBrightness[] = {
-    { "Bright", SWMenuLevel::INFO, 0 },
-    { "Normal", SWMenuLevel::INFO, 1 },
-    { "Dim",    SWMenuLevel::INFO, 2 },
+    { "High",   SWMenuLevel::INFO, 0 },
+    { "Medium", SWMenuLevel::INFO, 1 },
+    { "Low",    SWMenuLevel::INFO, 2 },
 };
 const uint8_t kMenuBrightnessCount = sizeof(kMenuBrightness) / sizeof(kMenuBrightness[0]);
 
@@ -309,7 +309,7 @@ void ScrollWheelMenuAddon::setup() {
         : 0;
     g_manualLightEffectsEnabled = opts.manualLightEffectsEnabled;
 
-    // "All OFF" is persisted as three black colors plus two unset legacy
+    // "Turn Lights Off" is persisted as three black colors plus two unset legacy
     // effects. Reconstruct the rail request without changing protobuf layout.
     g_menuRgbPowerEnabled = !persistedAllOff;
 
@@ -443,7 +443,7 @@ void ScrollWheelMenuAddon::navSelect() {
         return;
     }
 
-    // RGB_SUB "All OFF": immediate action — turn off all LEDs.
+    // RGB_SUB "Turn Lights Off": immediate action — turn off all LEDs.
     // Reset colors to black and persist both legacy effects as unset.
     if (currentLevel == SWMenuLevel::RGB_SUB && idx == RGB_SUB_ALL_OFF_INDEX) {
         g_menuRgbEffectColor = 0;
@@ -553,7 +553,7 @@ void ScrollWheelMenuAddon::navSelect() {
         return;
     }
 
-    // Bluetooth Type is independent from the wired USB InputMode. Persist the
+    // Bluetooth Mode is independent from the wired USB InputMode. Persist the
     // product selection, then reboot RP2350 with the same visible blackout used
     // by Controller Type. The proxy can sync C6 during the reboot delay or after
     // the new RP2350 boot while BT transport is active.

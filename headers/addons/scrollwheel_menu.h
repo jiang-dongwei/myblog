@@ -55,8 +55,8 @@ static constexpr uint32_t SCROLLWHEEL_GAMEPLAY_GPIO_MASK = 0x001FFFFCu;
 // ── Menu tree definition (shared between Core0 nav and Core1 render) ─────
 
 enum class SWMenuLevel : uint8_t {
-    MAIN          = 0,  // Level 0: RP2350, ESP32C6, RGB Customize (+ optional Battery Info)
-    RGB_SUB       = 1,  // Level 1: Key Flash, Light Effect, Brightness, All OFF
+    MAIN          = 0,  // Level 0: device, Bluetooth, battery, lighting, and controller modes
+    RGB_SUB       = 1,  // Level 1: Button Flash, Lighting Effect, Brightness, Turn Lights Off
     COLOR         = 2,  // Level 2: color names (Button RGB flash)
     INFO          = 3,  // Info pages (RP2350/ESP32C6)
     LIGHT_EFFECT  = 4,  // Level 2: shared GP22/GP40 effect picker
@@ -166,16 +166,16 @@ extern volatile uint8_t g_menuRgbEffectColor; // shared GP22/GP40 effect color
 extern volatile uint8_t g_menuRgbButton;  // button-press flash color
 
 // ── Shared RGB effect override set from the menu ────────────────────────
-// Uses SWLightEffect. 0xFF is reserved for the persisted All OFF state.
+// Uses SWLightEffect. 0xFF is reserved for the persisted all-off state.
 extern volatile uint8_t g_menuLightEffect;
 
 // Runtime request for the shared GP22/GP40 RGB power rail.  The menu only
 // changes this request; FightpadAmbientLEDAddon remains the sole GP24 writer.
-// "All OFF" clears it and selecting a visible color/effect sets it again.
+// "Turn Lights Off" clears it and selecting a visible color/effect sets it again.
 extern volatile bool g_menuRgbPowerEnabled;
 
-// Persisted GP30 master switch for normal Light Effect and Key Flash output.
-// It is intentionally separate from the menu's existing destructive All OFF
+// Persisted GP30 master switch for normal Lighting Effect and Button Flash output.
+// It is intentionally separate from the menu's existing Turn Lights Off
 // state. Bluetooth GP40 status feedback may still request temporary light
 // output while this switch is false.
 extern volatile bool g_manualLightEffectsEnabled;

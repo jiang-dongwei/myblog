@@ -40,12 +40,12 @@ static constexpr FightpadBluetoothProfile normalizeFightpadBluetoothProfile(uint
 static inline const char* getFightpadBluetoothProfileLabel(FightpadBluetoothProfile profile)
 {
     switch (profile) {
-    case FightpadBluetoothProfile::Xbox:     return "XBOX BLE";
-    case FightpadBluetoothProfile::Keyboard: return "KEYBOARD BLE";
-    case FightpadBluetoothProfile::PS5PC:    return "PS BLE";
-    case FightpadBluetoothProfile::Switch:   return "SWITCH BLE";
+    case FightpadBluetoothProfile::Xbox:     return "Xbox";
+    case FightpadBluetoothProfile::Keyboard: return "Keyboard";
+    case FightpadBluetoothProfile::PS5PC:    return "PlayStation";
+    case FightpadBluetoothProfile::Switch:   return "Switch";
     case FightpadBluetoothProfile::Generic:
-    default:                                 return "GENERIC BLE";
+    default:                                 return "Standard Gamepad";
     }
 }
 

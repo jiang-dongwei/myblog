@@ -275,7 +275,7 @@ void DisplayAddon::process() {
     if (bluetoothProfileOverlayActive && !splashScreenActive) {
         setDisplayPower(1);
         gpDisplay->clearScreen();
-        gpDisplay->drawText(3, 1, "Bluetooth Type");
+        gpDisplay->drawText(3, 1, "Bluetooth Mode");
         gpDisplay->drawText(
             4,
             3,
@@ -286,13 +286,13 @@ void DisplayAddon::process() {
             gpDisplay->drawText(5, 5, "Applying...");
             break;
         case FightpadESP32BluetoothProfileStatus::PairAgain:
-            gpDisplay->drawText(5, 5, "Pair Again");
+            gpDisplay->drawText(4, 5, "Re-pair Device");
             break;
         case FightpadESP32BluetoothProfileStatus::Timeout:
-            gpDisplay->drawText(4, 5, "Sync Timeout");
+            gpDisplay->drawText(3, 5, "Update Timed Out");
             break;
         case FightpadESP32BluetoothProfileStatus::ProtocolError:
-            gpDisplay->drawText(3, 5, "Protocol Error");
+            gpDisplay->drawText(4, 5, "Update Failed");
             break;
         case FightpadESP32BluetoothProfileStatus::SaveFailed:
             gpDisplay->drawText(4, 5, "Save Failed");
@@ -428,7 +428,7 @@ static void drawBatteryRuntimePage(GPGFX* display) {
     FightpadBQ27220BatteryAddon::ConfigurationSnapshot config = {};
     const bool configValid = FightpadBQ27220BatteryAddon::getConfigurationSnapshot(config);
 
-    display->drawText(0, 0, "Battery Info 1/4");
+    display->drawText(0, 0, "Battery Status 1/4");
     if (FightpadBQ27220BatteryAddon::isBatteryPercentValid() &&
         FightpadBQ27220BatteryAddon::isBatteryVoltageValid()) {
         std::snprintf(line, sizeof(line), "SOC:%03u%% V:%u",
@@ -475,10 +475,10 @@ static void drawBatteryRuntimePage(GPGFX* display) {
 static void drawBatteryConfigPage(GPGFX* display) {
     char line[22] = {};
     FightpadBQ27220BatteryAddon::ConfigurationSnapshot config = {};
-    display->drawText(0, 0, "BQ CONFIG 2/4");
+    display->drawText(0, 0, "Battery Setup 2/4");
 
     if (!FightpadBQ27220BatteryAddon::getConfigurationSnapshot(config)) {
-        display->drawText(0, 2, "Config read pending");
+        display->drawText(0, 2, "Loading Settings");
         display->drawText(0, 7, "< page >");
         return;
     }
@@ -503,10 +503,10 @@ static void drawBatteryConfigPage(GPGFX* display) {
 static void drawBatteryCalibrationPage(GPGFX* display) {
     char line[22] = {};
     FightpadBQ27220BatteryAddon::ConfigurationSnapshot config = {};
-    display->drawText(0, 0, "BQ CAL 3/4");
+    display->drawText(0, 0, "Calibration 3/4");
 
     if (!FightpadBQ27220BatteryAddon::getConfigurationSnapshot(config)) {
-        display->drawText(0, 2, "Cal read pending");
+        display->drawText(0, 2, "Loading Calibration");
         display->drawText(0, 7, "< page >");
         return;
     }
@@ -547,7 +547,7 @@ static void drawBatteryChargePage(GPGFX* display) {
     FightpadBQ27220BatteryAddon::ConfigurationSnapshot config = {};
     const bool configValid = FightpadBQ27220BatteryAddon::getConfigurationSnapshot(config);
 
-    display->drawText(0, 0, "BQ CHARGE 4/4");
+    display->drawText(0, 0, "Charging Info 4/4");
     if (configValid) {
         drawBatteryWordCheck(display, 1, "CV", config.chargingVoltage);
         drawBatteryWordCheck(display, 2, "TC", config.taperCurrent);
@@ -606,7 +606,7 @@ void DisplayAddon::drawScrollWheelMenu() {
         if (snap.infoSource == 0) {
             if (snap.index == 0) {
                 char infoLine[22] = {};
-                gpDisplay->drawText(0, 0, "RP2350B Firmware");
+                gpDisplay->drawText(0, 0, "Device Information");
 
                 std::snprintf(infoLine, sizeof(infoLine), "SDK: %.16s", PICO_SDK_VERSION_STRING);
                 gpDisplay->drawText(0, 1, infoLine);
@@ -618,13 +618,13 @@ void DisplayAddon::drawScrollWheelMenu() {
                 gpDisplay->drawText(0, 3, infoLine);
 
                 gpDisplay->drawText(0, 4, "CPU: Cortex-M33");
-                gpDisplay->drawText(0, 7, "Back: press");
+                gpDisplay->drawText(0, 7, "Press to Go Back");
                 gpDisplay->render();
                 return;
             } else {
                 FightpadESP32FirmwareInfo firmwareInfo = {};
                 char infoLine[22] = {};
-                gpDisplay->drawText(0, 0, "ESP32C6 Firmware");
+                gpDisplay->drawText(0, 0, "Bluetooth Firmware");
 
                 if (getFightpadESP32FirmwareInfo(firmwareInfo)) {
                     std::snprintf(infoLine, sizeof(infoLine), "SDK: %.16s", firmwareInfo.sdk);
@@ -645,10 +645,10 @@ void DisplayAddon::drawScrollWheelMenu() {
                     std::snprintf(infoLine, sizeof(infoLine), "CPU: %.16s", firmwareInfo.cpu);
                     gpDisplay->drawText(0, 6, infoLine);
                 } else {
-                    gpDisplay->drawText(0, 3, "Coming to soon");
+                    gpDisplay->drawText(0, 3, "Info Unavailable");
                 }
 
-                gpDisplay->drawText(0, 7, "Back: press");
+                gpDisplay->drawText(0, 7, "Press to Go Back");
                 gpDisplay->render();
                 return;
             }
@@ -657,8 +657,8 @@ void DisplayAddon::drawScrollWheelMenu() {
             if (snap.index < kMenuColorsCount)
                 gpDisplay->drawText(0, 1, kMenuColors[snap.index].label);
         }
-        gpDisplay->drawText(0, 3, "Coming soon");
-        gpDisplay->drawText(0, 7, "Back: press");
+        gpDisplay->drawText(0, 3, "No Details");
+        gpDisplay->drawText(0, 7, "Press to Go Back");
         gpDisplay->render();
         return;
     }
@@ -701,7 +701,7 @@ void DisplayAddon::drawScrollWheelMenu() {
         default: break;
     }
     if (table == nullptr || count == 0) {
-        gpDisplay->drawText(0, 0, "No data");
+        gpDisplay->drawText(0, 0, "No Options");
         gpDisplay->render();
         return;
     }
