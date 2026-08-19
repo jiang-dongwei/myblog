@@ -385,15 +385,15 @@ int8_t ButtonLayoutScreen::update() {
     bool configMode = DriverManager::getInstance().isConfigMode();
     uint8_t profileNumber = getGamepad()->getOptions().profileNumber;
 
-    // In Web Config, B1 returns to the instruction screen. Check B1's own
-    // release edge before doing any layout/history work so other held button
-    // bits cannot block the exit.
+    // In Web Config, B1 is navigation rather than a preview input. Return on
+    // its press edge before doing layout/history work; DisplayAddon performs
+    // the page switch before drawing, so B1 never animates on this screen.
     if (configMode) {
         uint16_t buttonState = getGamepad()->state.buttons;
-        bool b1Released = (prevButtonState & GAMEPAD_MASK_B1) &&
-                          !(buttonState & GAMEPAD_MASK_B1);
+        bool b1Pressed = !(prevButtonState & GAMEPAD_MASK_B1) &&
+                         (buttonState & GAMEPAD_MASK_B1);
         prevButtonState = buttonState;
-        if (b1Released) {
+        if (b1Pressed) {
             return DisplayMode::CONFIG_INSTRUCTION;
         }
     }

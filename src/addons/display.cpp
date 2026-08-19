@@ -344,6 +344,17 @@ void DisplayAddon::process() {
     }
 
     int8_t screenReturn = gpScreen->update();
+
+    // Switch before drawing the old screen so B1 is never rendered as a
+    // preview animation when it is being used to return to Web Config home.
+    if (configMode && currDisplayMode == DisplayMode::BUTTONS &&
+        screenReturn == DisplayMode::CONFIG_INSTRUCTION) {
+        currDisplayMode = DisplayMode::CONFIG_INSTRUCTION;
+        updateDisplayScreen();
+        gpScreen->draw();
+        return;
+    }
+
     gpScreen->draw();
 
     if (!configMode && screenReturn < 0) {
@@ -725,11 +736,25 @@ void DisplayAddon::drawScrollWheelMenu() {
     // 0xFF = nothing active / never set.
     uint8_t activeVal = 0xFF;
     switch (level) {
-        case SWMenuLevel::COLOR:               activeVal = g_menuRgbButton;       break;
+        case SWMenuLevel::RGB_SUB:
+            if (g_menuLightEffect == LIGHT_EFFECT_CUSTOM_THEME)
+                activeVal = LIGHT_EFFECT_CUSTOM_THEME;
+            break;
+        case SWMenuLevel::COLOR:
+            // Custom Theme owns its pressed colors, so the saved fallback
+            // flash color is intentionally not marked while it is running.
+            if (g_menuLightEffect != LIGHT_EFFECT_CUSTOM_THEME)
+                activeVal = g_menuRgbButton;
+            break;
         case SWMenuLevel::COLOR_EFFECT:
         case SWMenuLevel::COLOR_EFFECT_BREATH:
         case SWMenuLevel::COLOR_EFFECT_CHASE:  activeVal = g_menuRgbEffectColor;  break;
-        case SWMenuLevel::LIGHT_EFFECT:        activeVal = g_menuLightEffect;     break;
+        case SWMenuLevel::LIGHT_EFFECT:
+            // Custom Theme now lives one level higher under Lighting. With it
+            // active, no standard effect should show a stale marker.
+            if (g_menuLightEffect != LIGHT_EFFECT_CUSTOM_THEME)
+                activeVal = g_menuLightEffect;
+            break;
         case SWMenuLevel::BRIGHTNESS:          activeVal = g_menuBrightnessLevel; break;
         case SWMenuLevel::CONTROLLER_TYPE:
             activeVal = static_cast<uint8_t>(Storage::getInstance().getGamepadOptions().inputMode);

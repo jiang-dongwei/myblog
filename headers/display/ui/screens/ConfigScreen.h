@@ -15,6 +15,7 @@ class ConfigScreen : public GPScreen {
     protected:
         virtual void drawScreen();
         uint16_t prevButtonState = 0;
+        bool waitForButtonRelease = false;
         int8_t prevDisplayMode = 0;
         int8_t currDisplayMode = 0;
         std::string version;

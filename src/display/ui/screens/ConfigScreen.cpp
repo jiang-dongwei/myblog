@@ -4,6 +4,8 @@
 void ConfigScreen::init() {
     version = "GP2040-CE : ";
     version += GP2040VERSION;
+    prevButtonState = getGamepad()->state.buttons;
+    waitForButtonRelease = prevButtonState != 0;
     getRenderer()->clearScreen();
 }
 
@@ -13,6 +15,14 @@ void ConfigScreen::shutdown() {
 
 int8_t ConfigScreen::update() {
     uint16_t buttonState = getGamepad()->state.buttons;
+    if (waitForButtonRelease) {
+        prevButtonState = buttonState;
+        if (buttonState == 0) {
+            waitForButtonRelease = false;
+        }
+        return -1;
+    }
+
     if (prevButtonState && !buttonState) {
         switch (prevButtonState) {
             case (GAMEPAD_MASK_B1):

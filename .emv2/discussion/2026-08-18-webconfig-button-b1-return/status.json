@@ -1,0 +1,20 @@
+{
+  "discussion_id": "2026-08-18-webconfig-button-b1-return",
+  "created_at": "2026-08-18",
+  "current_phase": 6,
+  "phases": {
+    "split": "completed",
+    "requirements": "completed",
+    "hardware": "completed",
+    "brainstorm": "completed",
+    "milestones": "completed"
+  },
+  "subsystems": [
+    "config_instruction_navigation",
+    "button_preview",
+    "display_transition",
+    "input_drain"
+  ],
+  "current_subsystem": 4,
+  "status": "completed"
+}

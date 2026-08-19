@@ -1,7 +1,5 @@
 #include "RestartScreen.h"
 
-#include "BitmapScreens.h"
-
 #include "pico/stdlib.h"
 #include "system.h"
 
@@ -15,7 +13,16 @@ void RestartScreen::shutdown() {
 }
 
 void RestartScreen::drawScreen() {
-    getRenderer()->drawSprite((uint8_t *)bitmapGP2040Logo, 128, 35, 10, 0, 2, 1);
+    // Reuse the same persisted 128x64 image shown by SplashScreen. This keeps
+    // the Web Config restart page aligned with the product logo selected by
+    // the user (or the Fightpad board default on a freshly flashed device).
+    getRenderer()->drawSprite(
+        (uint8_t*)getDisplayOptions().splashImage.bytes,
+        128, 64, 16, 0, 0, 1);
+
+    // Reserve the bottom two text rows so mode and progress messages remain
+    // readable regardless of the colors/pixels in the configured image.
+    getRenderer()->drawRectangle(0, 48, 128, 64, 0, 1);
 
     switch ((System::BootMode)this->bootMode) {
         case System::BootMode::USB:

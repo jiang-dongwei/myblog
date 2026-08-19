@@ -12,7 +12,8 @@
 
 // ── Menu data tables ─────────────────────────────────────────────────────
 
-static constexpr uint8_t RGB_SUB_ALL_OFF_INDEX = 3;
+static constexpr uint8_t RGB_SUB_CUSTOM_THEME_INDEX = 2;
+static constexpr uint8_t RGB_SUB_ALL_OFF_INDEX = 4;
 static constexpr uint8_t BRIGHTNESS_LEVEL_COUNT = 3;
 static constexpr uint32_t GAMEPLAY_INPUT_RELEASE_MS = 30;
 
@@ -117,6 +118,7 @@ const uint8_t kMenuBluetoothTypesCount =
 const SWMenuItem kMenuRgbSub[] = {
     { "Button Flash",     SWMenuLevel::COLOR,  0 },
     { "Lighting Effect",  SWMenuLevel::LIGHT_EFFECT, 0 },
+    { "Custom Theme",     SWMenuLevel::INFO, LIGHT_EFFECT_CUSTOM_THEME },
     { "Brightness",       SWMenuLevel::BRIGHTNESS, 0 },
     { "Turn Lights Off",  SWMenuLevel::INFO,   0 },  // immediate action, no sub-level
 };
@@ -165,7 +167,6 @@ const SWMenuItem kMenuLightEffects[] = {
     { "Breathing",    SWMenuLevel::COLOR_EFFECT_BREATH, LIGHT_EFFECT_BREATHING },
     { "Rainbow",      SWMenuLevel::INFO,                LIGHT_EFFECT_RAINBOW },
     { "Chase",        SWMenuLevel::COLOR_EFFECT_CHASE,  LIGHT_EFFECT_CHASE },
-    { "Custom Theme", SWMenuLevel::INFO,                LIGHT_EFFECT_CUSTOM_THEME },
 };
 const uint8_t kMenuLightEffectsCount = sizeof(kMenuLightEffects) / sizeof(kMenuLightEffects[0]);
 
@@ -443,8 +444,8 @@ void ScrollWheelMenuAddon::navSelect() {
     // The warning page is transient. A short press dismisses it immediately
     // without changing the running effect or its persisted star marker.
     if (currentLevel == SWMenuLevel::CUSTOM_THEME_UNDEFINED) {
-        g_menuState.level = static_cast<uint8_t>(SWMenuLevel::LIGHT_EFFECT);
-        g_menuState.index = LIGHT_EFFECT_CUSTOM_THEME;
+        g_menuState.level = static_cast<uint8_t>(SWMenuLevel::RGB_SUB);
+        g_menuState.index = RGB_SUB_CUSTOM_THEME_INDEX;
         g_menuState.scrollOffset = 0;
         clampScrollOffset();
         markMenuDirty();
@@ -533,20 +534,6 @@ void ScrollWheelMenuAddon::navSelect() {
         const SWMenuItem* table = currentMenuTable();
         const SWMenuItem& item = table[idx];
         if (item.targetLevel == SWMenuLevel::INFO) {
-            // Disabling the Web Config theme prevents a new activation, but
-            // an already-running Custom Theme remains valid across reboot.
-            // This failure path deliberately changes no light or flash state.
-            if (item.targetIndex == LIGHT_EFFECT_CUSTOM_THEME &&
-                !Storage::getInstance().getAnimationOptions().hasCustomTheme &&
-                g_menuLightEffect != LIGHT_EFFECT_CUSTOM_THEME) {
-                customThemePromptUntil =
-                    getMillis() + SCROLLWHEEL_CUSTOM_THEME_PROMPT_MS;
-                g_menuState.level = static_cast<uint8_t>(
-                    SWMenuLevel::CUSTOM_THEME_UNDEFINED);
-                g_menuState.scrollOffset = 0;
-                markMenuDirty();
-                return;
-            }
             g_menuLightEffect = item.targetIndex;
             g_menuRgbPowerEnabled = true;
             g_manualLightEffectsEnabled = true;
@@ -613,6 +600,32 @@ void ScrollWheelMenuAddon::navSelect() {
         }
         // Return to BUTTONS immediately; the pending save/reboot continues.
         navToggle();
+        return;
+    }
+
+    // Custom Theme is a peer of Button Flash and Lighting Effect because it
+    // supplies both the normal and pressed button colors. Keep its runtime and
+    // persisted effect ID unchanged; only its menu placement changes.
+    if (currentLevel == SWMenuLevel::RGB_SUB &&
+        idx == RGB_SUB_CUSTOM_THEME_INDEX) {
+        // Disabling the Web Config theme prevents a new activation, but an
+        // already-running Custom Theme remains valid across reboot.
+        if (!Storage::getInstance().getAnimationOptions().hasCustomTheme &&
+            g_menuLightEffect != LIGHT_EFFECT_CUSTOM_THEME) {
+            customThemePromptUntil =
+                getMillis() + SCROLLWHEEL_CUSTOM_THEME_PROMPT_MS;
+            g_menuState.level = static_cast<uint8_t>(
+                SWMenuLevel::CUSTOM_THEME_UNDEFINED);
+            g_menuState.scrollOffset = 0;
+            markMenuDirty();
+            return;
+        }
+
+        g_menuLightEffect = LIGHT_EFFECT_CUSTOM_THEME;
+        g_menuRgbPowerEnabled = true;
+        g_manualLightEffectsEnabled = true;
+        persistConfig();
+        markMenuDirty();
         return;
     }
 
@@ -777,8 +790,8 @@ void ScrollWheelMenuAddon::navBack() {
         break;
     case SWMenuLevel::CUSTOM_THEME_UNDEFINED:
         // Dismiss the warning without changing the active effect/star.
-        g_menuState.level = static_cast<uint8_t>(SWMenuLevel::LIGHT_EFFECT);
-        g_menuState.index = LIGHT_EFFECT_CUSTOM_THEME;
+        g_menuState.level = static_cast<uint8_t>(SWMenuLevel::RGB_SUB);
+        g_menuState.index = RGB_SUB_CUSTOM_THEME_INDEX;
         g_menuState.scrollOffset = 0;
         clampScrollOffset();
         markMenuDirty();
@@ -928,8 +941,8 @@ void ScrollWheelMenuAddon::process() {
         static_cast<SWMenuLevel>(g_menuState.level) ==
             SWMenuLevel::CUSTOM_THEME_UNDEFINED &&
         static_cast<int32_t>(now - customThemePromptUntil) >= 0) {
-        g_menuState.level = static_cast<uint8_t>(SWMenuLevel::LIGHT_EFFECT);
-        g_menuState.index = LIGHT_EFFECT_CUSTOM_THEME;
+        g_menuState.level = static_cast<uint8_t>(SWMenuLevel::RGB_SUB);
+        g_menuState.index = RGB_SUB_CUSTOM_THEME_INDEX;
         g_menuState.scrollOffset = 0;
         clampScrollOffset();
         markMenuDirty();

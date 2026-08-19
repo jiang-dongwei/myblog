@@ -183,6 +183,26 @@
 - 功能: Bluetooth Type实际变化并保存后执行与USB Controller Type相同的500ms黑屏和RP2350重启；相同Profile不重启
 - 讨论ID: `2026-08-17-ble-profile-visible-reboot`
 
+### GPIO13 配对状态幂等切换
+- 物理硬件: 复用 ESP32-C6 GPIO13 配对按键、RP2350B↔ESP32-C6 UART0、OLED 和 GP40 状态灯
+- 功能: `0x03` 持续显示 Pairing，`0x00/0x01/0x02` 任一状态立即替换 Pairing；相同状态重发不刷新事件序号、时间戳或动画
+- 讨论ID: `2026-08-18-gpio13-pairing-toggle-rp2350`
+
+### Web Config Button预览B1直接返回
+- 物理硬件: 复用Fightpad12Slim GP6 B1和现有OLED，不新增按键
+- 功能: Web Config的Button预览页中B1不绘制按键动画，按下立即返回`CONFIG_INSTRUCTION`并排空本次输入；其他按键继续正常预览
+- 讨论ID: `2026-08-18-webconfig-button-b1-return`
+
+### Custom Theme 上移到 Lighting 菜单
+- 物理硬件: 无变化，复用现有GP22/GP40灯链、GP24电源门控和OLED拨轮菜单
+- 功能: Custom Theme与Button Flash、Lighting Effect同级；激活时仅在Lighting父级标记，两个被覆盖的子页不显示误导状态
+- 讨论ID: `2026-08-18-custom-theme-parent-menu`
+
+### Web Config重启页复用配置启动图
+- 物理硬件: 无变化，复用现有128×64 OLED和Flash DisplayOptions
+- 功能: RestartScreen使用当前持久化启动图片替代旧GP2040 Logo，同时保留底部模式说明和Please Wait提示
+- 讨论ID: `2026-08-18-restart-screen-configured-splash`
+
 ## 开发步骤状态
 
 | 步骤 | 描述 | 状态 | 讨论ID |
@@ -352,3 +372,18 @@
 | S48-C | GP40将12色环形插值为19灯并保持覆盖优先级 | completed | 2026-08-18-custom-theme-lighting-menu |
 | S48-D | 菜单、存储、映射、边界、优先级与Chase周期非编译静态验证 | completed | 2026-08-18-custom-theme-lighting-menu |
 | S48-E | 用户构建烧录并完成Custom Theme及原灯效实机回归 | pending | 2026-08-18-custom-theme-lighting-menu |
+| S49-A | 统一0x53状态发布点与OLED/GP40消费路径审计 | completed | 2026-08-18-gpio13-pairing-toggle-rp2350 |
+| S49-B | 相同状态幂等去重及Pairing终止状态即时替换 | completed | 2026-08-18-gpio13-pairing-toggle-rp2350 |
+| S49-C | 03重复与03到00/01/02转换的非编译静态验证 | completed | 2026-08-18-gpio13-pairing-toggle-rp2350 |
+| S49-D | 用户构建烧录并完成GPIO13配对开关实机联调 | pending | 2026-08-18-gpio13-pairing-toggle-rp2350 |
+| S50-A | Button预览页B1按下边沿直接返回且跳过旧页绘制 | completed | 2026-08-18-webconfig-button-b1-return |
+| S50-B | ConfigScreen入口释放门控，防止同次B1重新进入 | completed | 2026-08-18-webconfig-button-b1-return |
+| S50-C | 修复EventManager注销循环卡死并完成页面转换静态验证 | completed | 2026-08-18-webconfig-button-b1-return |
+| S50-D | 用户构建烧录并验证B1返回及其他按键动画 | pending | 2026-08-18-webconfig-button-b1-return |
+| S51-A | Custom Theme移到Lighting父级并修正选择、All Off及提示返回路径 | completed | 2026-08-18-custom-theme-parent-menu |
+| S51-B | 父级Custom Theme标记及子页备用状态标记抑制 | completed | 2026-08-18-custom-theme-parent-menu |
+| S51-C | 菜单索引、持久化编号、提示路径与变更范围非编译静态验证 | completed | 2026-08-18-custom-theme-parent-menu |
+| S51-D | 用户构建烧录并验证菜单层级、星号及原灯效回归 | pending | 2026-08-18-custom-theme-parent-menu |
+| S52-A | RestartScreen改用持久化splashImage并保留底部提示区 | completed | 2026-08-18-restart-screen-configured-splash |
+| S52-B | 图片来源、尺寸、BootMode文字和旧Logo依赖非编译静态验证 | completed | 2026-08-18-restart-screen-configured-splash |
+| S52-C | 用户构建烧录并从Web Config验证各重启目标画面 | pending | 2026-08-18-restart-screen-configured-splash |

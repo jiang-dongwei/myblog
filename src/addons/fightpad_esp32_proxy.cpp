@@ -80,6 +80,17 @@ void publishFirmwareInfo(const FightpadESP32FirmwareInfo& info)
 void publishBluetoothStatus(FightpadESP32BluetoothStatus status)
 {
     critical_section_enter_blocking(&bluetoothStatusCriticalSection);
+
+    // ESP32-C6 may retransmit the same status frame for reliability.  Treat
+    // those copies as one state event so Pairing does not recreate the OLED
+    // overlay or restart its GP40 animation.  A different status (including
+    // Disconnected, Connecting, or Connected) is still published immediately
+    // and therefore replaces Pairing from any currently displayed page.
+    if (bluetoothStatusSnapshot.valid && bluetoothStatusSnapshot.status == status) {
+        critical_section_exit(&bluetoothStatusCriticalSection);
+        return;
+    }
+
     bluetoothStatusSnapshot.valid = true;
     bluetoothStatusSnapshot.status = status;
     bluetoothStatusSnapshot.receivedAtMs = getMillis();

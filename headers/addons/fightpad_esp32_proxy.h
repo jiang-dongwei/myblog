@@ -192,8 +192,10 @@ struct FightpadESP32BluetoothStatusEvent {
     uint32_t sequence = 0;
 };
 
-// Core0 publishes each valid status frame.  Core0 lighting and Core1 display
-// both use the receive timestamp so their transient indication ends together.
+// Core0 publishes each valid status transition. Repeated frames carrying the
+// current status are idempotent and retain the original timestamp/sequence.
+// Core0 lighting and Core1 display use the same snapshot so Pairing is replaced
+// immediately by Disconnected, Connecting, or Connected on every page.
 bool getFightpadESP32BluetoothStatusEvent(FightpadESP32BluetoothStatusEvent& event);
 bool isFightpadESP32BluetoothStatusEventActive(
     const FightpadESP32BluetoothStatusEvent& event,

@@ -2,6 +2,35 @@
 
 ## 当前问题
 
+### [2026-08-18] Web Config Button预览按B1退出时卡死
+
+- **状态**: retest_pending
+- **步骤**: S50-D
+- **发现时间**: 2026-08-18
+- **相关HVR**: -
+- **描述**: Web Config初始页按B1可进入Button预览，其他按键预览正常，但再次按B1退出时程序卡住。
+
+### 分析
+
+- UF2生成时间16:19晚于相关源码16:15，已排除未重新编译或烧录旧源码。
+- B1退出会销毁`ButtonLayoutScreen`，其`shutdown()`连续注销Profile Change和USB Host事件回调。
+- `EventManager::unregisterEventHandler()`的回调遍历循环错误使用`it++`，没有推进`funcIt`；目标不是首项时会重复检查同一回调并破坏外层迭代器，形成退出卡死。
+
+### 解决方案
+
+- 将错误的循环增量改为`funcIt++`。
+- B1继续在按下边沿请求返回，并在旧Button页绘制前切到`CONFIG_INSTRUCTION`，所以不显示B1动画。
+- `ConfigScreen`在进入时若仍有按钮按住，只等待这次释放，不把同一次B1松开当作重新进入命令。
+
+### 闭环记录
+
+- **解决日期**: -
+- **解决方案**: 源码根因已修复，等待用户重新构建烧录复测
+- **验证方式**: B1进入、B1退出、连续重复10次、其他按键动画及正常游戏模式B1
+- **证据**: `src/eventmanager.cpp`、`src/display/ui/screens/ButtonLayoutScreen.cpp`
+
+---
+
 ### [2026-08-13] PS5 USB环境下BLE Profile只改RAM未可靠落盘
 
 - **状态**: retest_pending

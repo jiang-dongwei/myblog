@@ -935,3 +935,54 @@ Base Effect 和 Key Effect 都需要同时提供两个呼吸灯入口：
 ### 讨论ID
 
 `2026-08-17-ble-profile-visible-reboot`
+
+## 2026-08-18: GPIO13配对状态幂等切换 (S49)
+
+- 以ESP32-C6协作文档为既定协议依据：`FS 03`进入并持续显示Pairing，`FS 00/01/02`任一合法状态都立即退出Pairing，不新增取消状态或修改8字节UART格式。
+- 审计确认OLED和GP40都消费统一的`bluetoothStatusSnapshot`，不存在页面栈；原问题是`publishBluetoothStatus()`对每次重发都更新时间戳并递增序号，导致重复唤醒和Pairing动画重置。
+- 在统一发布点增加相同状态幂等去重：快照有效且状态未变化时直接返回，保留原`receivedAtMs`和`sequence`；不同状态仍立即发布并替换当前Pairing。
+- 该修改不碰Profile编号、名称、VID/PID、Bond、校验、ACK、重启流程或ESP32-C6工程。
+- 完成`03→00`、`03→01`、`03→02`及重复`03`路径的非编译静态检查；按协作文档约定未运行构建和烧录，S49-D由用户完成。
+
+### 讨论ID
+
+`2026-08-18-gpio13-pairing-toggle-rp2350`
+
+## 2026-08-18: Web Config Button预览B1直接返回 (S50)
+
+- 用户确认Button预览仍复用正常开机的`ButtonLayoutScreen`，但Web Config下B1只作为返回键，不显示B1按键动画；不改用A2。
+- `ButtonLayoutScreen::update()`在`configMode`下改为检测B1按下边沿，并在布局、输入历史和绘制前请求返回`CONFIG_INSTRUCTION`；正常游戏模式以及其他按键预览保持不变。
+- `DisplayAddon::process()`对该特定转换先切换并绘制新页面，不再绘制一次旧Button页，因此B1不会闪现按下图案。
+- 返回后启用输入释放排空，在B1及同时按住的其他按钮全部松开前不把输入交给`ConfigScreen`，避免同一次B1松开再次进入Button页面。
+- 完成条件分支、转换顺序和正常模式隔离的非编译静态检查；按仓库约定未运行构建，等待用户烧录验证。
+- 首次实机复测仍在B1退出时卡住；UF2时间16:19晚于相关源码16:15，确认不是旧固件。
+- 根因定位到`EventManager::unregisterEventHandler()`：遍历回调向量时错误递增外层`it`而不是`funcIt`，Button页退出调用`shutdown()`注销事件时会卡在同一个回调或破坏外层迭代器。
+- 将循环增量修正为`funcIt++`；同时把释放门控收回`ConfigScreen`本地，页面由B1按下边沿切换且在旧Button页绘制前完成，保持B1无动画。
+
+### 讨论ID
+
+`2026-08-18-webconfig-button-b1-return`
+
+## 2026-08-18: Custom Theme 上移到 Lighting 菜单 (S51)
+
+- 用户指出Custom Theme同时提供Normal和Pressed颜色，作为Lighting Effect子项会让Button Flash状态语义不一致。
+- 将其从`kMenuLightEffects`移到`kMenuRgbSub`，菜单顺序改为Button Flash、Lighting Effect、Custom Theme、Brightness、Turn Lights Off。
+- Custom Theme运行时只在父级Custom Theme行显示`*`；Lighting Effect和Button Flash子页不显示被覆盖的备用状态，但不清除备用配置。
+- 未定义提示的超时、短按关闭和Back全部返回Lighting父级Custom Theme行；运行时编号5、兼容存储值7、Web Config开关与延迟停用规则保持不变。
+- 完成菜单计数、All Off索引、选择路径、状态标记和持久化编号的非编译静态检查；构建与烧录由用户完成。
+
+### 讨论ID
+
+`2026-08-18-custom-theme-parent-menu`
+
+## 2026-08-18: Web Config重启页复用配置启动图 (S52)
+
+- 审计确认Web Config重启API触发`GPRestartEvent`并进入独立`RestartScreen`；旧页面固定绘制`bitmapGP2040Logo`，与正常开机读取Flash `splashImage`的`SplashScreen`不是同一路径。
+- 将RestartScreen图片源改为`getDisplayOptions().splashImage.bytes`，复用128×64、pitch=16参数，因此量产默认图和Web Config上传图都能自动同步到重启页面。
+- 完整图片绘制后清除底部两行作为文字区，保留Controller/WebConfig/BOOTSEL现有模式说明和`Please Wait`等文字。
+- 删除RestartScreen对旧`BitmapScreens.h` Logo的依赖，不修改启动图存储、Splash时长、Web API、GPRestartEvent或重启流程。
+- 完成图片源、尺寸、文字分支和旧Logo引用的非编译静态检查；构建与烧录由用户完成。
+
+### 讨论ID
+
+`2026-08-18-restart-screen-configured-splash`
