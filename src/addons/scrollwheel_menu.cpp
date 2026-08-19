@@ -86,7 +86,7 @@ const SWMenuItem kMenuMainUsb[] = {
     { "Battery Details",    SWMenuLevel::BATTERY_INFO, 0 },
 #endif
     { "Lighting",           SWMenuLevel::RGB_SUB, 0 },
-    { "USB Mode",           SWMenuLevel::CONTROLLER_TYPE, 0 },
+    { "Controller Mode",    SWMenuLevel::CONTROLLER_TYPE, 0 },
 };
 const SWMenuItem kMenuMainBluetooth[] = {
     { "Device Info",        SWMenuLevel::INFO, 0 },
@@ -95,7 +95,7 @@ const SWMenuItem kMenuMainBluetooth[] = {
     { "Battery Details",    SWMenuLevel::BATTERY_INFO, 0 },
 #endif
     { "Lighting",           SWMenuLevel::RGB_SUB, 0 },
-    { "Bluetooth Mode",     SWMenuLevel::BLUETOOTH_TYPE, 0 },
+    { "Controller Mode",    SWMenuLevel::BLUETOOTH_TYPE, 0 },
 };
 const uint8_t kMenuMainCount = sizeof(kMenuMainUsb) / sizeof(kMenuMainUsb[0]);
 static_assert(
@@ -212,6 +212,24 @@ static std::atomic<bool> bluetoothProfileSavePending { false };
 static bool bluetoothProfilePreviousHasValue = false;
 static uint32_t bluetoothProfilePreviousValue = 0;
 static FightpadBluetoothProfile bluetoothProfileSaveTarget = FightpadBluetoothProfile::Xbox;
+
+bool isFightpadBluetoothIdleSleepExpired(uint32_t now) {
+#if FIGHTPAD12SLIM_OLED_IDLE_SLEEP_ENABLED
+    bool bluetoothSelected = false;
+    if (!getFightpadESP32BluetoothTransportSelected(bluetoothSelected) ||
+        !bluetoothSelected) {
+        return false;
+    }
+
+    const uint32_t activityMs =
+        g_scrollWheelLastActivityMs.load(std::memory_order_acquire);
+    return (now - activityMs) >=
+        FIGHTPAD12SLIM_OLED_IDLE_SLEEP_TIMEOUT_MS;
+#else
+    (void)now;
+    return false;
+#endif
+}
 
 bool isFightpadBluetoothProfileSavePending() {
     return bluetoothProfileSavePending.load(std::memory_order_acquire);
@@ -972,6 +990,7 @@ void ScrollWheelMenuAddon::process() {
          mainMenuBluetoothSelected != bluetoothSelected)) {
         mainMenuTransportValid = true;
         mainMenuBluetoothSelected = bluetoothSelected;
+        g_scrollWheelLastActivityMs.store(now, std::memory_order_release);
 
         if (g_menuState.active) {
             const SWMenuLevel level =

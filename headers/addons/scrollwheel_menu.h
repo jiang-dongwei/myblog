@@ -54,6 +54,14 @@ static constexpr uint32_t SCROLLWHEEL_GAMEPLAY_GPIO_MASK = 0x001FFFFCu;
 #define SCROLLWHEEL_CUSTOM_THEME_PROMPT_MS 1500
 #endif
 
+#ifndef FIGHTPAD12SLIM_OLED_IDLE_SLEEP_ENABLED
+#define FIGHTPAD12SLIM_OLED_IDLE_SLEEP_ENABLED 0
+#endif
+
+#ifndef FIGHTPAD12SLIM_OLED_IDLE_SLEEP_TIMEOUT_MS
+#define FIGHTPAD12SLIM_OLED_IDLE_SLEEP_TIMEOUT_MS 60000
+#endif
+
 #define ScrollWheelMenuName "ScrollWheelMenu"
 
 // ── Menu tree definition (shared between Core0 nav and Core1 render) ─────
@@ -157,9 +165,14 @@ extern volatile bool g_scrollWheelButtonBusy;
 // when the button release follows a long press (menu enter or exit).
 extern volatile bool g_scrollWheelButtonLongPressed;
 
-// Last activity from GP2..GP20 or raw edge on GP30/GP31/GP32.
-// Written by Core0 and read by Core1 to control Fightpad OLED idle sleep.
+// Last activity from GP2..GP20, GP30/GP31/GP32, transport changes, or a new
+// Bluetooth status event. Shared by the OLED and RGB idle-power gates.
 extern std::atomic<uint32_t> g_scrollWheelLastActivityMs;
+
+// USB transport never idles. Bluetooth transport idles after the configured
+// OLED timeout; callers use this RAM-only result without changing user RGB or
+// display settings.
+bool isFightpadBluetoothIdleSleepExpired(uint32_t now);
 
 // ── RGB color overrides set from the menu ───────────────────────────────
 // Each stores an AnimationStation `colors` vector index (0..15), or 0xFF.

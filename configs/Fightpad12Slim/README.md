@@ -33,6 +33,8 @@ Enter RP2350 BOOTSEL mode using the board recovery path/test pad, then copy the 
 | `R1` (RB) | Boot into Xbox One input mode (`DEFAULT_INPUT_MODE_R1`) |
 | `B4` (Y / Triangle) | Boot into PS5 input mode (`DEFAULT_INPUT_MODE_B4`, USB auth) |
 
+While the controller is already running in USB transport mode, hold `X` + `Y` + `TURBO` for 5 seconds to reboot into RP2350 BOOTSEL. The runtime shortcut is disabled while GP33 selects Bluetooth transport; changing transport or releasing any required button restarts the hold timer.
+
 ## Pin Mapping
 
 | GPIO | Function | GP2040-CE assignment | Notes |
@@ -116,7 +118,7 @@ The first line follows the configured BQ27220 boot delay, then output uses `FIGH
 
 The BUTTONS page keeps the normal button viewer and shows the BQ27220 numeric SOC immediately to the left of the four-cell battery icon in the upper-right corner. It does not overlay voltage, current, or FCC diagnostics. The four Battery Info debug pages remain compiled, but their level-0 entry is hidden by `SCROLLWHEEL_BATTERY_INFO_MENU_ENABLED=0`; set it to `1` to restore the entry for gauge debugging.
 
-Core0 records activity from every debounced GP2-GP20 gameplay key and every raw edge on GP30, GP31, or GP32. When no such activity has been seen for 60 seconds, the Core1 display addon powers off the SSD1306 and skips further frame rendering. Pressing any gameplay key or operating GP30/GP31/GP32 powers the OLED back on immediately without consuming the input; Bluetooth status transitions retain their existing wake behavior.
+Core0 records activity from every debounced GP2-GP20 gameplay key, every raw edge on GP30/GP31/GP32, and a debounced GP33 transport change. USB transport never enters the Fightpad idle-power state: the SSD1306 remains on and the generic display saver is bypassed. In Bluetooth transport, 60 seconds without activity powers off the SSD1306, sends a final black frame to both the GP22 and GP40 WS2812 chains, and then drives GP24 low. Pressing any gameplay key or operating GP30/GP31/GP32 restores the display and the previously selected RGB effect without consuming the input or changing persisted settings; Bluetooth status transitions retain their existing wake behavior and restart the shared timeout.
 
 ## BQ27220 Low-Battery LED Cutoff
 

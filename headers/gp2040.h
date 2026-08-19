@@ -31,6 +31,12 @@ private:
     uint32_t gpioDebounceTime[NUM_BANK0_GPIOS];
 
     struct RebootHotkeys {
+        enum class Action {
+            NONE,
+            WEB_CONFIG,
+            BOOTSEL,
+        };
+
         RebootHotkeys();
         void process(Gamepad* gamepad, bool configMode);
 
@@ -39,7 +45,8 @@ private:
         absolute_time_t noButtonsPressedTimeout;
         uint16_t webConfigHotkeyMask;
         uint16_t bootselHotkeyMask;
-        absolute_time_t rebootHotkeysHoldTimeout;
+        Action pendingAction;
+        absolute_time_t rebootHotkeyHoldTimeout;
     };
     RebootHotkeys rebootHotkeys;
 
@@ -65,7 +72,7 @@ private:
         SET_INPUT_MODE_XBOXORIGINAL,
         SET_INPUT_MODE_SWITCH_PRO,
     };
-    BootAction getBootAction();
+    BootAction getBootAction(System::BootMode requestedBootMode);
     void getReinitGamepad(Gamepad * gamepad);
 
     // GPIO manipulation for setup and profile reinit

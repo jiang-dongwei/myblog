@@ -154,6 +154,22 @@ bool DisplayAddon::isDisplayPowerOff()
     Gamepad * gamepad = Storage::getInstance().GetGamepad();
     const uint32_t now = getMillis();
 
+#if FIGHTPAD12SLIM_OLED_IDLE_SLEEP_ENABLED
+    bool bluetoothSelected = false;
+    const bool bluetoothTransportActive =
+        getFightpadESP32BluetoothTransportSelected(bluetoothSelected) &&
+        bluetoothSelected;
+    if (!bluetoothTransportActive) {
+        // Wired mode is externally powered and must never enter either the
+        // Fightpad idle-off path or the generic display saver.
+        if (!displayIsPowerOn)
+            setDisplayPower(1);
+        displaySaverTimer = displaySaverTimeout;
+        prevMillis = now;
+        return false;
+    }
+#endif
+
     if (turnOffWhenSuspended && get_usb_suspended()) {
         if (displayIsPowerOn)
             setDisplayPower(0);
@@ -171,7 +187,7 @@ bool DisplayAddon::isDisplayPowerOff()
     }
 
     if (!bluetoothWakeActive &&
-        (now - activityMs) >= FIGHTPAD12SLIM_OLED_IDLE_SLEEP_TIMEOUT_MS) {
+        isFightpadBluetoothIdleSleepExpired(now)) {
         setDisplayPower(0);
         prevMillis = now;
         return true;
@@ -238,6 +254,7 @@ void DisplayAddon::process() {
         lastBluetoothStatusSequence = bluetoothEvent.sequence;
         lastBluetoothStatusActivityMs = now;
         bluetoothStatusActivityValid = true;
+        g_scrollWheelLastActivityMs.store(now, std::memory_order_release);
         displaySaverTimer = displaySaverTimeout;
         prevMillis = now;
     }
@@ -250,6 +267,7 @@ void DisplayAddon::process() {
         lastBluetoothProfileSequence = bluetoothProfileEvent.sequence;
         lastBluetoothStatusActivityMs = now;
         bluetoothStatusActivityValid = true;
+        g_scrollWheelLastActivityMs.store(now, std::memory_order_release);
         displaySaverTimer = displaySaverTimeout;
         prevMillis = now;
     }

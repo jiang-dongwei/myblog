@@ -50,6 +50,7 @@
 
 static const uint32_t REBOOT_HOTKEY_ACTIVATION_TIME_MS = 50;
 static const uint32_t REBOOT_HOTKEY_HOLD_TIME_MS = 4000;
+static const uint32_t FIGHTPAD_USB_BOOTSEL_HOTKEY_HOLD_TIME_MS = 5000;
 
 const static uint32_t rebootDelayMs = 500;
 static absolute_time_t rebootDelayTimeout = nil_time;
@@ -118,6 +119,36 @@ static bool fightpadBluetoothTransportSelected() {
 	}
 
 	return fightpadTransportDebounceStable;
+}
+
+static bool fightpadUsbBootselHotkeyPressed(Gamepad* gamepad) {
+	bool xPressed = false;
+	bool yPressed = false;
+	bool turboPressed = false;
+	GpioMappingInfo* pinMappings = Storage::getInstance().getProfilePinMappings();
+	const Pin_t debouncedPinCount = static_cast<Pin_t>(sizeof(Mask_t) * 8);
+
+	for (Pin_t pin = 0; pin < static_cast<Pin_t>(NUM_BANK0_GPIOS) && pin < debouncedPinCount; pin++) {
+		if ((gamepad->debouncedGpio & (static_cast<Mask_t>(1) << pin)) == 0) {
+			continue;
+		}
+
+		switch (pinMappings[pin].action) {
+			case GpioAction::BUTTON_PRESS_B3:
+				xPressed = true;
+				break;
+			case GpioAction::BUTTON_PRESS_B4:
+				yPressed = true;
+				break;
+			case GpioAction::BUTTON_PRESS_TURBO:
+				turboPressed = true;
+				break;
+			default:
+				break;
+		}
+	}
+
+	return xPressed && yPressed && turboPressed;
 }
 
 static bool fightpadUsbDeviceShouldAttach(bool configMode, bool bluetoothTransportSelected) {
@@ -202,6 +233,16 @@ static bool processFightpadUsbTransportReport(
 }
 
 void GP2040::setup() {
+	// A software BOOTSEL request survives the watchdog reset in scratch RAM.
+	// Consume it before any add-on setup can power the RGB rail or transmit a
+	// startup frame; otherwise the LEDs visibly flash just before the ROM drive
+	// mounts.
+	const System::BootMode requestedBootMode = System::takeBootMode();
+	if (requestedBootMode == System::BootMode::USB) {
+		reset_usb_boot(0, 0);
+		return;
+	}
+
 	Storage::getInstance().init();
 
 	PeripheralManager::getInstance().initUSB();
@@ -277,7 +318,7 @@ void GP2040::setup() {
 	addons.LoadAddon(new InputMacro());
 
 	InputMode inputMode = gamepad->getOptions().inputMode;
-	const BootAction bootAction = getBootAction();
+	const BootAction bootAction = getBootAction(requestedBootMode);
 	switch (bootAction) {
 		case BootAction::ENTER_WEBCONFIG_MODE:
 			inputMode = INPUT_MODE_CONFIG;
@@ -564,8 +605,8 @@ void GP2040::getReinitGamepad(Gamepad * gamepad) {
 	}
 }
 
-GP2040::BootAction GP2040::getBootAction() {
-	switch (System::takeBootMode()) {
+GP2040::BootAction GP2040::getBootAction(System::BootMode requestedBootMode) {
+	switch (requestedBootMode) {
 		case System::BootMode::GAMEPAD: return BootAction::NONE;
 		case System::BootMode::WEBCONFIG: return BootAction::ENTER_WEBCONFIG_MODE;
 		case System::BootMode::USB: return BootAction::ENTER_USB_MODE;
@@ -657,7 +698,8 @@ GP2040::RebootHotkeys::RebootHotkeys() :
 	noButtonsPressedTimeout(nil_time),
 	webConfigHotkeyMask(GAMEPAD_MASK_S2 | GAMEPAD_MASK_B3 | GAMEPAD_MASK_B4),
 	bootselHotkeyMask(GAMEPAD_MASK_S1 | GAMEPAD_MASK_B3 | GAMEPAD_MASK_B4),
-	rebootHotkeysHoldTimeout(nil_time) {
+	pendingAction(Action::NONE),
+	rebootHotkeyHoldTimeout(nil_time) {
 }
 
 void GP2040::RebootHotkeys::process(Gamepad* gamepad, bool configMode) {
@@ -667,7 +709,7 @@ void GP2040::RebootHotkeys::process(Gamepad* gamepad, bool configMode) {
 	if (!active) {
 		if (gamepad->state.buttons == 0) {
 			if (is_nil_time(noButtonsPressedTimeout)) {
-				noButtonsPressedTimeout = make_timeout_time_us(REBOOT_HOTKEY_ACTIVATION_TIME_MS);
+				noButtonsPressedTimeout = make_timeout_time_ms(REBOOT_HOTKEY_ACTIVATION_TIME_MS);
 			}
 
 			if (time_reached(noButtonsPressedTimeout)) {
@@ -677,21 +719,53 @@ void GP2040::RebootHotkeys::process(Gamepad* gamepad, bool configMode) {
 			noButtonsPressedTimeout = nil_time;
 		}
 	} else {
-		if (gamepad->state.buttons == webConfigHotkeyMask || gamepad->state.buttons == bootselHotkeyMask) {
-			if (is_nil_time(rebootHotkeysHoldTimeout)) {
-				rebootHotkeysHoldTimeout = make_timeout_time_ms(REBOOT_HOTKEY_HOLD_TIME_MS);
-			}
+		const bool webConfigHotkeyPressed = gamepad->state.buttons == webConfigHotkeyMask;
+		const bool fightpadTransportAware = fightpadTransportSwitchAvailable();
+		const bool bootselHotkeyPressed = fightpadTransportAware
+			? (!configMode &&
+			   !fightpadBluetoothTransportSelected() &&
+			   fightpadUsbBootselHotkeyPressed(gamepad))
+			: (gamepad->state.buttons == bootselHotkeyMask);
 
-			if (time_reached(rebootHotkeysHoldTimeout)) {
-				if (gamepad->state.buttons == webConfigHotkeyMask) {
-					// If we are in webconfig mode we go to gamepad mode and vice versa
-					System::reboot(configMode ? System::BootMode::GAMEPAD : System::BootMode::WEBCONFIG);
-				} else if (gamepad->state.buttons == bootselHotkeyMask) {
-					System::reboot(System::BootMode::USB);
-				}
+		Action requestedAction = Action::NONE;
+		uint32_t holdTimeMs = REBOOT_HOTKEY_HOLD_TIME_MS;
+		if (webConfigHotkeyPressed) {
+			requestedAction = Action::WEB_CONFIG;
+		} else if (bootselHotkeyPressed) {
+			requestedAction = Action::BOOTSEL;
+			if (fightpadTransportAware) {
+				holdTimeMs = FIGHTPAD_USB_BOOTSEL_HOTKEY_HOLD_TIME_MS;
 			}
-		} else {
-			rebootHotkeysHoldTimeout = nil_time;
+		}
+
+		if (requestedAction == Action::NONE) {
+			pendingAction = Action::NONE;
+			rebootHotkeyHoldTimeout = nil_time;
+			return;
+		}
+
+		if (requestedAction != pendingAction || is_nil_time(rebootHotkeyHoldTimeout)) {
+			pendingAction = requestedAction;
+			rebootHotkeyHoldTimeout = make_timeout_time_ms(holdTimeMs);
+			return;
+		}
+
+		if (time_reached(rebootHotkeyHoldTimeout)) {
+			if (pendingAction == Action::WEB_CONFIG) {
+				// If we are in webconfig mode we go to gamepad mode and vice versa
+				System::reboot(configMode ? System::BootMode::GAMEPAD : System::BootMode::WEBCONFIG);
+			} else if (pendingAction == Action::BOOTSEL) {
+				// Give the ambient LED writer one full reboot-delay window to send
+				// black to both WS2812 chains and then pull GP24 low. The next boot
+				// consumes this USB request before add-ons are initialized, avoiding
+				// a startup-frame flash on the way into the RP2350 ROM.
+				g_scrollWheelRebootBlackout = true;
+				pendingAction = Action::NONE;
+				rebootHotkeyHoldTimeout = nil_time;
+				active = false;
+				EventManager::getInstance().triggerEvent(
+					new GPRestartEvent(System::BootMode::USB));
+			}
 		}
 	}
 }

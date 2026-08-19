@@ -210,7 +210,7 @@
 
 ### 控制器菜单按当前传输档位限制
 - 物理硬件: 复用GP33传输选择开关和现有128x64 OLED
-- 功能: USB档位主菜单只显示`USB Mode`，蓝牙档位主菜单只显示`Bluetooth Mode`；菜单打开期间切换档位会立即刷新，已进入失效控制器子菜单时自动返回主菜单
+- 功能: USB和蓝牙档位的主菜单入口统一显示美式游戏界面文案`Controller Mode`，但分别进入当前传输对应的有线或蓝牙控制器列表；菜单打开期间切换档位会立即刷新，已进入失效控制器子菜单时自动返回主菜单
 - 讨论ID: `2026-08-19-transport-aware-controller-menus`
 
 ### Turn Lights Off可恢复总开关
@@ -222,6 +222,11 @@
 - 物理硬件: 复用RP2350原生USB设备接口
 - 功能: Fightpad12Slim在所有有线控制器模式下统一向主机报告USB产品名`FIGHTPADSLIM`，不修改VID/PID、协议描述符或蓝牙广播名称
 - 讨论ID: `2026-08-19-fightpadslim-usb-product-name`
+
+### USB常亮与蓝牙统一省电
+- 物理硬件: 复用GP33传输开关、SSD1306 OLED、GP22/GP40 RGB灯链和GP24升压使能
+- 功能: USB档不进行空闲休眠；蓝牙档沿用60秒空闲时间并同时关闭OLED与RGB供电，任意按键、滚轮输入、传输切换或蓝牙状态变化可唤醒并恢复原配置
+- 讨论ID: `2026-08-19-transport-aware-display-rgb-sleep`
 
 ## 开发步骤状态
 
@@ -422,3 +427,8 @@
 | S56-A | 在USB字符串回调中按Fightpad12Slim板型统一覆盖产品名 | completed | 2026-08-19-fightpadslim-usb-product-name |
 | S56-B | 完成最终ELF反汇编、RP2350 UF2和增量构建验证 | completed | 2026-08-19-fightpadslim-usb-product-name |
 | S56-C | 用户烧录并在主机重新枚举后确认显示FIGHTPADSLIM | pending | 2026-08-19-fightpadslim-usb-product-name |
+| S57-A | 发布按已消抖传输档位与共享活动时间计算的BT空闲状态 | completed | 2026-08-19-transport-aware-display-rgb-sleep |
+| S57-B | USB档绕过OLED空闲关闭与通用屏保，BT档保留60秒休眠 | completed | 2026-08-19-transport-aware-display-rgb-sleep |
+| S57-C | BT空闲在RGB渲染和最终输出双层门控并关闭GP24 | completed | 2026-08-19-transport-aware-display-rgb-sleep |
+| S57-D | 完成构建、UF2板型和差异静态验证 | completed | 2026-08-19-transport-aware-display-rgb-sleep |
+| S57-E | 用户烧录验证USB常亮、BT同步休眠及任意按键恢复 | pending | 2026-08-19-transport-aware-display-rgb-sleep |

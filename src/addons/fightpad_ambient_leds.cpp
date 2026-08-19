@@ -543,6 +543,13 @@ void FightpadAmbientLEDAddon::render(uint32_t now) {
     bluetoothStatusLightRequired = false;
     clearFrame();
 
+    // Bluetooth transport shares the OLED inactivity timer. This is a
+    // transient blackout only: selected effects, colors, button flash, and
+    // persisted master switches remain untouched for instant wake restore.
+    if (isFightpadBluetoothIdleSleepExpired(now)) {
+        return;
+    }
+
     // Low-battery protection is a transient render override.  It does not
     // change the user's enabled/effect/color settings, so the current effect
     // resumes automatically after a valid SOC sample rises above the cutoff.
@@ -955,6 +962,7 @@ void FightpadAmbientLEDAddon::show() {
     const bool outputEnabled = g_menuRgbPowerEnabled &&
         !g_scrollWheelRebootBlackout &&
         (enabled || bluetoothStatusLightRequired) &&
+        !isFightpadBluetoothIdleSleepExpired(getMillis()) &&
         !FightpadBQ27220BatteryAddon::isLowBatteryLightCutoffActive();
     if (!outputEnabled) {
         clearFrame();

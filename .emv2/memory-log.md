@@ -1004,7 +1004,7 @@ Base Effect 和 Key Effect 都需要同时提供两个呼吸灯入口：
 
 - 审计确认主菜单`USB Mode`和`Bluetooth Mode`此前无GP33入口门控，两种物理档位都能进入并修改另一传输通道的控制器类型。
 - 在ESP32 Proxy现有临界区快照上增加只读查询接口，菜单使用已经过30 ms消抖并发布的传输状态，不重复实现GP33判定和消抖。
-- 根据后续要求将提示门控改为入口过滤：USB档位主菜单只显示`USB Mode`，蓝牙档位只显示`Bluetooth Mode`，两张等长菜单表保持公共项和父级索引兼容。
+- 根据后续要求将提示门控改为入口过滤，两张等长菜单表保持公共项和父级索引兼容；入口文案随后统一为美式游戏界面标题`Controller Mode`，USB档进入有线列表，蓝牙档进入蓝牙列表。
 - 菜单打开期间检测已消抖传输快照变化并刷新显示；若当时停留在失效的控制器子菜单，则自动返回主菜单并选中新档位入口。
 - 正确档位的类型列表、USB InputMode保存重启、BLE Profile保存重启逻辑均未修改；不修改GP33/GP34极性、协议和配置格式。
 - 完成残留提示符号、对称菜单表、跨核状态、索引路径和差异静态检查；复用`build-ce-no-picotool`完成增量构建并用picotool验证RP2350 UF2，烧录与实机验证待用户完成。
@@ -1036,3 +1036,15 @@ Base Effect 和 Key Effect 都需要同时提供两个呼吸灯入口：
 ### 讨论ID
 
 `2026-08-19-fightpadslim-usb-product-name`
+
+## 2026-08-19: USB常亮与蓝牙统一省电 (S57)
+
+- 复用现有`g_scrollWheelLastActivityMs`和60秒OLED超时，不增加持久化字段；共享查询只在GP33已消抖快照为BT且活动超时时返回休眠。
+- USB档在OLED电源判断中保持开启并绕过通用Display Saver；快照尚未发布时按USB安全回退，避免启动阶段误关屏。
+- BT档超时后，RGB在`render()`清空两条帧并提前返回，`show()`最终写入门控再次拦截，发送黑帧后拉低GP24；灯效、颜色、Button Flash、GP30和Turn Lights Off配置均不改变。
+- GP2-GP20、GP30、GP31、GP32继续更新共享活动时间；新增GP33传输变化和新的蓝牙状态/Profile事件刷新时间，按键唤醒后下一帧恢复OLED和原RGB效果。
+- 复用`build-ce-no-picotool`构建成功；低电保护、控制器重启黑屏和持久化总开关仍保持更高优先级，烧录实机验证待用户完成。
+
+### 讨论ID
+
+`2026-08-19-transport-aware-display-rgb-sleep`
