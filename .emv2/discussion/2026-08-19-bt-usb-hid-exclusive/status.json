@@ -1,0 +1,18 @@
+{
+  "discussion_id": "2026-08-19-bt-usb-hid-exclusive",
+  "created_at": "2026-08-19",
+  "current_phase": 5,
+  "phases": {
+    "split": "completed",
+    "requirements": "completed",
+    "hardware": "completed",
+    "brainstorm": "completed",
+    "milestones": "completed"
+  },
+  "subsystems": [
+    "USB device connection state machine",
+    "transport switching safety",
+    "special boot mode compatibility"
+  ],
+  "current_subsystem": 2
+}

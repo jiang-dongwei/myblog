@@ -181,6 +181,8 @@ const uint8_t kMenuBrightnessCount = sizeof(kMenuBrightness) / sizeof(kMenuBrigh
 
 volatile ScrollWheelMenuState g_menuState = { false, 0, 0, 0 };
 volatile bool g_menuStateDirty = false;
+volatile SWTransportModePrompt g_scrollWheelTransportModePrompt =
+    SWTransportModePrompt::NONE;
 volatile bool g_scrollWheelMenuActive = false;
 volatile bool g_scrollWheelButtonBusy = false;
 volatile bool g_scrollWheelButtonLongPressed = false;
@@ -268,11 +270,13 @@ void ScrollWheelMenuAddon::setup() {
     debouncedButton = false;
     btnFromLong     = false;
     customThemePromptUntil = 0;
+    transportModePromptUntil = 0;
 
     g_menuState.active = false;
     g_menuState.level = 0;
     g_menuState.index = 0;
     g_menuState.scrollOffset = 0;
+    g_scrollWheelTransportModePrompt = SWTransportModePrompt::NONE;
     g_menuStateDirty = false;
     g_scrollWheelMenuActive = false;
     g_scrollWheelRebootBlackout = false;
@@ -408,6 +412,11 @@ static void clampScrollOffset() {
 
 void ScrollWheelMenuAddon::navUp() {
     if (!g_menuState.active) return;
+    if (g_scrollWheelTransportModePrompt != SWTransportModePrompt::NONE) {
+        g_scrollWheelTransportModePrompt = SWTransportModePrompt::NONE;
+        markMenuDirty();
+        return;
+    }
     if (g_menuState.index > 0)
         g_menuState.index--;
     else
@@ -418,6 +427,11 @@ void ScrollWheelMenuAddon::navUp() {
 
 void ScrollWheelMenuAddon::navDown() {
     if (!g_menuState.active) return;
+    if (g_scrollWheelTransportModePrompt != SWTransportModePrompt::NONE) {
+        g_scrollWheelTransportModePrompt = SWTransportModePrompt::NONE;
+        markMenuDirty();
+        return;
+    }
     uint8_t count = currentItemCount();
     if (g_menuState.index < count - 1)
         g_menuState.index++;
@@ -448,6 +462,12 @@ void ScrollWheelMenuAddon::navSelect() {
         g_menuState.index = RGB_SUB_CUSTOM_THEME_INDEX;
         g_menuState.scrollOffset = 0;
         clampScrollOffset();
+        markMenuDirty();
+        return;
+    }
+
+    if (g_scrollWheelTransportModePrompt != SWTransportModePrompt::NONE) {
+        g_scrollWheelTransportModePrompt = SWTransportModePrompt::NONE;
         markMenuDirty();
         return;
     }
@@ -646,6 +666,31 @@ void ScrollWheelMenuAddon::navSelect() {
     const SWMenuItem& item = table[idx];
     SWMenuLevel target = item.targetLevel;
 
+    // Controller profile menus are meaningful only for the active physical
+    // transport. Keep MAIN and its selected row intact while Core1 displays a
+    // short instruction overlay for the opposite transport.
+    if (currentLevel == SWMenuLevel::MAIN &&
+        (target == SWMenuLevel::CONTROLLER_TYPE ||
+         target == SWMenuLevel::BLUETOOTH_TYPE)) {
+        bool bluetoothSelected = false;
+        if (getFightpadESP32BluetoothTransportSelected(bluetoothSelected)) {
+            const bool usbMenuBlocked =
+                target == SWMenuLevel::CONTROLLER_TYPE && bluetoothSelected;
+            const bool bluetoothMenuBlocked =
+                target == SWMenuLevel::BLUETOOTH_TYPE && !bluetoothSelected;
+            if (usbMenuBlocked || bluetoothMenuBlocked) {
+                mainIndex = idx;
+                g_scrollWheelTransportModePrompt = usbMenuBlocked
+                    ? SWTransportModePrompt::SWITCH_TO_USB
+                    : SWTransportModePrompt::SWITCH_TO_BLE;
+                transportModePromptUntil =
+                    getMillis() + SCROLLWHEEL_TRANSPORT_MODE_PROMPT_MS;
+                markMenuDirty();
+                return;
+            }
+        }
+    }
+
     if (target == SWMenuLevel::INFO) {
         if (currentLevel == SWMenuLevel::MAIN) {
             mainIndex = idx;
@@ -715,6 +760,10 @@ void ScrollWheelMenuAddon::navSelect() {
 }
 
 void ScrollWheelMenuAddon::navToggle() {
+    // A long press may close/reopen the menu while an instruction overlay is
+    // visible. Never carry that RAM-only prompt into the next menu session.
+    g_scrollWheelTransportModePrompt = SWTransportModePrompt::NONE;
+
     if (!g_menuState.active) {
         g_menuState.active = true;
         g_menuState.level = static_cast<uint8_t>(SWMenuLevel::MAIN);
@@ -733,6 +782,12 @@ void ScrollWheelMenuAddon::navToggle() {
 
 void ScrollWheelMenuAddon::navBack() {
     if (!g_menuState.active) return;
+
+    if (g_scrollWheelTransportModePrompt != SWTransportModePrompt::NONE) {
+        g_scrollWheelTransportModePrompt = SWTransportModePrompt::NONE;
+        markMenuDirty();
+        return;
+    }
 
     SWMenuLevel currentLevel = static_cast<SWMenuLevel>(g_menuState.level);
 
@@ -936,6 +991,12 @@ void ScrollWheelMenuAddon::updateGameplayInputLock(uint32_t now) {
 
 void ScrollWheelMenuAddon::process() {
     uint32_t now = getMillis();
+
+    if (g_scrollWheelTransportModePrompt != SWTransportModePrompt::NONE &&
+        static_cast<int32_t>(now - transportModePromptUntil) >= 0) {
+        g_scrollWheelTransportModePrompt = SWTransportModePrompt::NONE;
+        markMenuDirty();
+    }
 
     if (g_menuState.active &&
         static_cast<SWMenuLevel>(g_menuState.level) ==

@@ -229,6 +229,11 @@ void publishFightpadESP32BluetoothProfileSaveFailed(FightpadBluetoothProfile pro
 // instead of showing an unconfirmed menu selection.
 bool getFightpadESP32ActiveBluetoothProfile(FightpadBluetoothProfile& profile);
 
+// Returns the latest debounced GP33 transport selection published by the
+// proxy. The value is read-only and remains independent of the configured USB
+// InputMode and BLE Profile.
+bool getFightpadESP32BluetoothTransportSelected(bool& bluetoothSelected);
+
 class FightpadESP32ProxyAddon : public GPAddon {
 public:
     virtual bool available();

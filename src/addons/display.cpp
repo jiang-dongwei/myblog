@@ -612,6 +612,19 @@ void DisplayAddon::drawScrollWheelMenu() {
     gpDisplay->clearScreen();
     SWMenuLevel level = static_cast<SWMenuLevel>(snap.level);
 
+    const SWTransportModePrompt transportPrompt =
+        g_scrollWheelTransportModePrompt;
+    if (transportPrompt != SWTransportModePrompt::NONE) {
+        gpDisplay->drawText(
+            0,
+            3,
+            transportPrompt == SWTransportModePrompt::SWITCH_TO_USB
+                ? "Switch to USB Mode"
+                : "Switch to BLE Mode");
+        gpDisplay->render();
+        return;
+    }
+
     if (level == SWMenuLevel::CUSTOM_THEME_UNDEFINED) {
         gpDisplay->drawText(0, 2, "Custom Theme");
         gpDisplay->drawText(0, 4, "Not Defined");

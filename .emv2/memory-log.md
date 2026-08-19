@@ -986,3 +986,29 @@ Base Effect 和 Key Effect 都需要同时提供两个呼吸灯入口：
 ### 讨论ID
 
 `2026-08-18-restart-screen-configured-splash`
+
+## 2026-08-19: 蓝牙档位与USB HID互斥 (S53)
+
+- 审计确认旧逻辑在GP33蓝牙档位仍保持RP2350 USB控制器枚举，只持续发送中立报告；这会让PC同时看到BLE控制器和一个无输入的USB控制器，存在游戏选错设备的量产体验风险。
+- 在`src/gp2040.cpp`增加TinyUSB连接状态机：普通控制器进入蓝牙档位时调用`tud_disconnect()`，切回USB档位时调用`tud_connect()`重新枚举；USB线仍可承担硬件供电和充电。
+- USB转蓝牙时沿用原中立报告路径，并设置20 ms有界等待；成功发出中立报告、主机未挂载或等待到期后均会断开，避免端点繁忙导致USB设备永久残留。
+- 同一轮循环只读取一次经30 ms消抖的GP33状态，同时驱动USB报告路由和USB连接状态，避免切换瞬间两条路径采用不同档位。
+- Web Config初始化时无条件保持TinyUSB连接；BOOTSEL在`run()`之前进入ROM，不受新状态机影响。未修改BLE Profile、USB InputMode、UART协议、Flash配置或ESP32-C6工程。
+- 完成TinyUSB RP2350 DCD拉起/撤销上拉实现、调用范围、配置模式边界和工作树差异的非编译静态检查；构建、烧录和实机验证由用户完成。
+
+### 讨论ID
+
+`2026-08-19-bt-usb-hid-exclusive`
+
+## 2026-08-19: 控制器菜单按当前传输档位限制 (S54)
+
+- 审计确认主菜单`USB Mode`和`Bluetooth Mode`此前无GP33入口门控，两种物理档位都能进入并修改另一传输通道的控制器类型。
+- 在ESP32 Proxy现有临界区快照上增加只读查询接口，菜单使用已经过30 ms消抖并发布的传输状态，不重复实现GP33判定和消抖。
+- 蓝牙档位选择`USB Mode`时显示`Switch to USB Mode`；USB档位选择`Bluetooth Mode`时显示`Switch to BLE Mode`，均不进入错误类型列表。
+- 提示采用1.5秒RAM覆盖层，主菜单层级、光标和滚动位置保持不变；提示期间旋转、短按选择、返回或长按开关菜单都会先清除提示，避免不可见的底层操作和下次菜单残留。
+- 正确档位的类型列表、USB InputMode保存重启、BLE Profile保存重启逻辑均未修改；不修改GP33/GP34极性、协议和配置格式。
+- 完成提示文本长度、对称入口条件、跨核状态、超时和导航路径的非编译静态检查；构建烧录由用户完成。
+
+### 讨论ID
+
+`2026-08-19-transport-aware-controller-menus`

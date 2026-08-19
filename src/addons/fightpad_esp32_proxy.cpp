@@ -244,6 +244,21 @@ bool getFightpadESP32ActiveBluetoothProfile(FightpadBluetoothProfile& profile)
     return valid;
 }
 
+bool getFightpadESP32BluetoothTransportSelected(bool& bluetoothSelected)
+{
+    if (!critical_section_is_initialized(&bluetoothProfileCriticalSection)) {
+        return false;
+    }
+
+    critical_section_enter_blocking(&bluetoothProfileCriticalSection);
+    const bool valid = bluetoothTransportSnapshotValid;
+    if (valid) {
+        bluetoothSelected = bluetoothTransportSnapshot;
+    }
+    critical_section_exit(&bluetoothProfileCriticalSection);
+    return valid;
+}
+
 #ifndef FIGHTPAD12SLIM_ESP32_PROXY_TRANSPORT_DIAGNOSTIC_PIN
 #define FIGHTPAD12SLIM_ESP32_PROXY_TRANSPORT_DIAGNOSTIC_PIN -1
 #endif

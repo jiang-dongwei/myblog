@@ -203,6 +203,16 @@
 - 功能: RestartScreen使用当前持久化启动图片替代旧GP2040 Logo，同时保留底部模式说明和Please Wait提示
 - 讨论ID: `2026-08-18-restart-screen-configured-splash`
 
+### 蓝牙档位与USB HID互斥
+- 物理硬件: 复用GP33传输选择开关、RP2350原生USB和现有ESP32-C6使能链路
+- 功能: 普通控制器在蓝牙档位软件断开TinyUSB设备，只保留USB供电/充电；切回USB档位时重新连接并枚举。有线转蓝牙时先尝试发送中立报告，Web Config始终保持USB连接，BOOTSEL ROM流程不变
+- 讨论ID: `2026-08-19-bt-usb-hid-exclusive`
+
+### 控制器菜单按当前传输档位限制
+- 物理硬件: 复用GP33传输选择开关和现有128x64 OLED
+- 功能: 蓝牙档位阻止进入USB Mode并提示`Switch to USB Mode`；USB档位阻止进入Bluetooth Mode并提示`Switch to BLE Mode`。提示只临时覆盖显示，主菜单层级和选中项保持不变
+- 讨论ID: `2026-08-19-transport-aware-controller-menus`
+
 ## 开发步骤状态
 
 | 步骤 | 描述 | 状态 | 讨论ID |
@@ -387,3 +397,11 @@
 | S52-A | RestartScreen改用持久化splashImage并保留底部提示区 | completed | 2026-08-18-restart-screen-configured-splash |
 | S52-B | 图片来源、尺寸、BootMode文字和旧Logo依赖非编译静态验证 | completed | 2026-08-18-restart-screen-configured-splash |
 | S52-C | 用户构建烧录并从Web Config验证各重启目标画面 | pending | 2026-08-18-restart-screen-configured-splash |
+| S53-A | 基于GP33增加TinyUSB软件断开与重新枚举状态机 | completed | 2026-08-19-bt-usb-hid-exclusive |
+| S53-B | USB转蓝牙时限时发送中立报告并隔离Web Config与BOOTSEL边界 | completed | 2026-08-19-bt-usb-hid-exclusive |
+| S53-C | 更新板级说明并完成调用路径、作用域和差异非编译静态验证 | completed | 2026-08-19-bt-usb-hid-exclusive |
+| S53-D | 用户构建烧录并验证USB/蓝牙切换、供电和特殊启动模式 | pending | 2026-08-19-bt-usb-hid-exclusive |
+| S54-A | 提供线程安全的GP33已消抖传输状态只读快照 | completed | 2026-08-19-transport-aware-controller-menus |
+| S54-B | 错误控制器菜单入口显示英文提示并保持主菜单状态 | completed | 2026-08-19-transport-aware-controller-menus |
+| S54-C | 提示超时、输入消费及正确菜单保存重启路径非编译静态验证 | completed | 2026-08-19-transport-aware-controller-menus |
+| S54-D | 用户构建烧录并验证USB/蓝牙两种档位菜单行为 | pending | 2026-08-19-transport-aware-controller-menus |

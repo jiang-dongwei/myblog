@@ -66,10 +66,17 @@ static absolute_time_t rebootDelayTimeout = nil_time;
 #define FIGHTPAD12SLIM_TRANSPORT_DEBOUNCE_MS 30
 #endif
 
+#ifndef FIGHTPAD12SLIM_USB_DETACH_GRACE_MS
+#define FIGHTPAD12SLIM_USB_DETACH_GRACE_MS 20
+#endif
+
 static bool fightpadTransportDebounceCandidate = false;
 static bool fightpadTransportDebounceStable = false;
 static bool fightpadTransportDebounceValid = false;
 static uint32_t fightpadTransportDebounceCandidateSinceMs = 0;
+static bool fightpadUsbDeviceAttached = true;
+static bool fightpadUsbDetachPending = false;
+static uint32_t fightpadUsbDetachPendingSinceMs = 0;
 
 static bool fightpadTransportSwitchAvailable() {
 	return isValidPin(FIGHTPAD12SLIM_TRANSPORT_SEL_PIN);
@@ -111,6 +118,65 @@ static bool fightpadBluetoothTransportSelected() {
 	}
 
 	return fightpadTransportDebounceStable;
+}
+
+static bool fightpadUsbDeviceShouldAttach(bool configMode, bool bluetoothTransportSelected) {
+	return configMode ||
+		!fightpadTransportSwitchAvailable() ||
+		!bluetoothTransportSelected;
+}
+
+static void initializeFightpadUsbDeviceAttachment(
+	bool configMode,
+	bool bluetoothTransportSelected
+) {
+	fightpadUsbDetachPending = false;
+	fightpadUsbDeviceAttached = true; // tud_init() connects the device by default.
+
+	if (!fightpadUsbDeviceShouldAttach(configMode, bluetoothTransportSelected)) {
+		tud_disconnect();
+		fightpadUsbDeviceAttached = false;
+	}
+}
+
+static void updateFightpadUsbDeviceAttachment(
+	bool configMode,
+	bool bluetoothTransportSelected,
+	bool neutralReportSent
+) {
+	const bool shouldAttach =
+		fightpadUsbDeviceShouldAttach(configMode, bluetoothTransportSelected);
+
+	if (shouldAttach) {
+		fightpadUsbDetachPending = false;
+		if (!fightpadUsbDeviceAttached) {
+			tud_connect();
+			fightpadUsbDeviceAttached = true;
+		}
+		return;
+	}
+
+	if (!fightpadUsbDeviceAttached) {
+		fightpadUsbDetachPending = false;
+		return;
+	}
+
+	const uint32_t now = getMillis();
+	if (!fightpadUsbDetachPending) {
+		fightpadUsbDetachPending = true;
+		fightpadUsbDetachPendingSinceMs = now;
+	}
+
+	// If a host is mounted, give the existing neutral-report path one short
+	// bounded opportunity to release every button before removing the device.
+	// A missing/busy host must never keep the USB device visible indefinitely.
+	const bool graceExpired =
+		(now - fightpadUsbDetachPendingSinceMs) >= FIGHTPAD12SLIM_USB_DETACH_GRACE_MS;
+	if (!tud_mounted() || neutralReportSent || graceExpired) {
+		tud_disconnect();
+		fightpadUsbDeviceAttached = false;
+		fightpadUsbDetachPending = false;
+	}
 }
 
 static bool processFightpadUsbTransportReport(
@@ -371,6 +437,12 @@ void GP2040::run() {
 
 	// Start the TinyUSB Device functionality
 	tud_init(TUD_OPT_RHPORT);
+	const bool initialBluetoothTransportSelected =
+		fightpadBluetoothTransportSelected();
+	initializeFightpadUsbDeviceAttachment(
+		configMode,
+		initialBluetoothTransportSelected
+	);
 
 	// Initialize our USB manager
 	USBHostManager::getInstance().start();
@@ -428,16 +500,24 @@ void GP2040::run() {
 		// Copy Processed Gamepad for Core1 (race condition otherwise)
 		memcpy(&processedGamepad->state, &gamepad->state, sizeof(GamepadState));
 
-		// Process Input Driver. In BT-HID mode, keep USB enumerated but neutral.
+		// Use one debounced transport snapshot for both report routing and USB
+		// attachment so a mode transition cannot briefly expose both inputs.
+		const bool bluetoothTransportSelected =
+			fightpadBluetoothTransportSelected();
 		bool processed = processFightpadUsbTransportReport(
 			inputDriver,
 			gamepad,
-			fightpadBluetoothTransportSelected(),
+			bluetoothTransportSelected,
 			gameplayInputLocked
 		);
 
 		// TinyUSB Task update
 		tud_task();
+		updateFightpadUsbDeviceAttachment(
+			configMode,
+			bluetoothTransportSelected,
+			processed
+		);
 
 		// Post-Process Add-ons with USB Report Processed Sent
 		addons.PostprocessAddons(processed);
