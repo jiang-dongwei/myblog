@@ -54,10 +54,6 @@ static constexpr uint32_t SCROLLWHEEL_GAMEPLAY_GPIO_MASK = 0x001FFFFCu;
 #define SCROLLWHEEL_CUSTOM_THEME_PROMPT_MS 1500
 #endif
 
-#ifndef SCROLLWHEEL_TRANSPORT_MODE_PROMPT_MS
-#define SCROLLWHEEL_TRANSPORT_MODE_PROMPT_MS 1500
-#endif
-
 #define ScrollWheelMenuName "ScrollWheelMenu"
 
 // ── Menu tree definition (shared between Core0 nav and Core1 render) ─────
@@ -92,12 +88,6 @@ enum SWLightEffect : uint8_t {
     LIGHT_EFFECT_UNSET        = 0xFF,
 };
 
-enum class SWTransportModePrompt : uint8_t {
-    NONE = 0,
-    SWITCH_TO_USB,
-    SWITCH_TO_BLE,
-};
-
 static constexpr uint8_t SW_BATTERY_PAGE_COUNT = 4;
 static constexpr uint8_t SW_RGB_SUB_ALL_OFF_INDEX = 4;
 
@@ -110,8 +100,8 @@ struct SWMenuItem {
 };
 
 // Forward-declare the menu table arrays
-extern const SWMenuItem kMenuMain[];
 extern const uint8_t      kMenuMainCount;
+const SWMenuItem* getScrollWheelMainMenuTable();
 
 extern const SWMenuItem kMenuRgbSub[];
 extern const uint8_t      kMenuRgbSubCount;
@@ -149,10 +139,6 @@ extern volatile ScrollWheelMenuState g_menuState;
 
 // Written by Core0 whenever g_menuState changes meaningfully.
 extern volatile bool g_menuStateDirty;
-
-// Transient Core0-to-Core1 overlay. It does not change the current menu level,
-// index, configured controller type, or transport selection.
-extern volatile SWTransportModePrompt g_scrollWheelTransportModePrompt;
 
 // Written by Core0, read by Core1 (DisplayAddon) and FightpadAmbientLEDAddon.
 extern volatile bool g_scrollWheelMenuActive;
@@ -274,7 +260,8 @@ private:
     bool prevBack = false;
     uint32_t lastBackTime = 0;
     uint32_t customThemePromptUntil = 0;
-    uint32_t transportModePromptUntil = 0;
+    bool mainMenuTransportValid = false;
+    bool mainMenuBluetoothSelected = false;
 
     // Stored parent indices for BACK navigation
     uint8_t mainIndex = 0;       // which item was selected in level 0

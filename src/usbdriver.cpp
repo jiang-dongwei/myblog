@@ -9,6 +9,7 @@
 #include "tusb.h"
 #include "BoardConfig.h"
 #include "drivermanager.h"
+#include "drivers/shared/driverhelper.h"
 
 #include <cstring>
 
@@ -147,6 +148,13 @@ bool tud_vendor_control_xfer_cb(uint8_t rhport, uint8_t stage,
 // Invoked when received GET STRING DESCRIPTOR request
 // Application return pointer to descriptor, whose contents must exist long enough for transfer to complete
 uint16_t const *tud_descriptor_string_cb(uint8_t index, uint16_t langid) {
+#ifdef GP2040_BOARDCONFIG
+	// Keep the board identity consistent across every wired controller mode.
+	// Individual protocol drivers still own all non-product descriptors.
+	if (index == 2 && std::strcmp(GP2040_BOARDCONFIG, "Fightpad12Slim") == 0) {
+		return getStringDescriptor("FIGHTPADSLIM", index);
+	}
+#endif
 	return DriverManager::getInstance().getDriver()->get_descriptor_string_cb(index, langid);
 }
 

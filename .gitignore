@@ -1,5 +1,6 @@
 .pio
 .vscode/
+.codex/config.toml
 .cache/
 node_modules/
 configs/MyBoard

@@ -1004,10 +1004,10 @@ Base Effect 和 Key Effect 都需要同时提供两个呼吸灯入口：
 
 - 审计确认主菜单`USB Mode`和`Bluetooth Mode`此前无GP33入口门控，两种物理档位都能进入并修改另一传输通道的控制器类型。
 - 在ESP32 Proxy现有临界区快照上增加只读查询接口，菜单使用已经过30 ms消抖并发布的传输状态，不重复实现GP33判定和消抖。
-- 蓝牙档位选择`USB Mode`时显示`Switch to USB Mode`；USB档位选择`Bluetooth Mode`时显示`Switch to BLE Mode`，均不进入错误类型列表。
-- 提示采用1.5秒RAM覆盖层，主菜单层级、光标和滚动位置保持不变；提示期间旋转、短按选择、返回或长按开关菜单都会先清除提示，避免不可见的底层操作和下次菜单残留。
+- 根据后续要求将提示门控改为入口过滤：USB档位主菜单只显示`USB Mode`，蓝牙档位只显示`Bluetooth Mode`，两张等长菜单表保持公共项和父级索引兼容。
+- 菜单打开期间检测已消抖传输快照变化并刷新显示；若当时停留在失效的控制器子菜单，则自动返回主菜单并选中新档位入口。
 - 正确档位的类型列表、USB InputMode保存重启、BLE Profile保存重启逻辑均未修改；不修改GP33/GP34极性、协议和配置格式。
-- 完成提示文本长度、对称入口条件、跨核状态、超时和导航路径的非编译静态检查；构建烧录由用户完成。
+- 完成残留提示符号、对称菜单表、跨核状态、索引路径和差异静态检查；复用`build-ce-no-picotool`完成增量构建并用picotool验证RP2350 UF2，烧录与实机验证待用户完成。
 
 ### 讨论ID
 
@@ -1025,3 +1025,14 @@ Base Effect 和 Key Effect 都需要同时提供两个呼吸灯入口：
 ### 讨论ID
 
 `2026-08-19-persistent-all-lights-toggle`
+
+## 2026-08-19: FightpadSlim USB产品名 (S56)
+
+- 截图中的`GP2040-CE (PS4)`来自PS4驱动USB Product String，不是OLED菜单文字；该模式使用VID/PID `1532:0401`。
+- 在TinyUSB全局字符串回调中只对`GP2040_BOARDCONFIG="Fightpad12Slim"`和产品字符串索引2返回`FIGHTPADSLIM`，因此所有有线控制器模式统一命名，其他板型和非产品字符串继续交给原驱动。
+- 未修改VID/PID、PS4/PS3/XInput等协议描述符、USB InputMode存储或ESP32-C6蓝牙广播名称。
+- 复用`build-ce-no-picotool`完整构建成功；最终ELF反汇编显示描述符长度/类型`0x031A`及UTF-16字符序列`FIGHTPADSLIM`，picotool确认产物仍为RP2350 ARM Secure、Fightpad12Slim、SDK 2.2.0。
+
+### 讨论ID
+
+`2026-08-19-fightpadslim-usb-product-name`
