@@ -90,7 +90,7 @@ Enter RP2350 BOOTSEL mode using the board recovery path/test pad, then copy the 
 
 ## Ambient LED Controls
 
-The Fightpad-specific ambient LED addon owns both WS2812 outputs: the 19-LED GP40 ambient chain on PIO2/SM0 and the 12-LED GP22 button chain on PIO2/SM1. It is also the sole writer of the active-high GP24 RGB-rail boost enable. `All OFF` first sends black to both chains, waits 1 ms for the PIO data and WS2812 latch interval, then drives GP24 low. Selecting a visible color/effect raises GP24, waits 5 ms for the rail to settle, and sends the restored frame. The persisted all-black/default-effect `All OFF` state is reconstructed at boot without adding a new protobuf field. GP30-GP32 remain the scrollwheel/menu controls; the old ambient control diagnostic paths are disabled.
+The Fightpad-specific ambient LED addon owns both WS2812 outputs: the 19-LED GP40 ambient chain on PIO2/SM0 and the 12-LED GP22 button chain on PIO2/SM1. It is also the sole writer of the active-high GP24 RGB-rail boost enable. `Turn Lights Off` first sends black to both chains, waits 1 ms for the PIO data and WS2812 latch interval, then drives GP24 low. Its independent persisted master switch preserves the selected effect, colors, Button Flash, brightness, and GP30 normal-effect state; the same row becomes `Turn Lights On` and restores those values. The master switch also suppresses temporary Bluetooth status output, while GP30 alone continues to gate only normal effects. Restoring raises GP24, waits 5 ms for the rail to settle, and sends the first restored frame. GP30-GP32 remain the scrollwheel/menu controls; the old ambient control diagnostic paths are disabled.
 
 ## ESP32-C6 BLE HID Feed
 

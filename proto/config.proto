@@ -922,6 +922,7 @@ message FightpadAmbientLEDOptions
     optional uint32 ambientEffectIndex = 5;     // Legacy Fightpad effect index; 7=Custom Theme, 0xFF=default
     optional uint32 brightnessLevel = 6;        // 0=Bright, 1=Normal, 2=Dim
     optional bool manualLightEffectsEnabled = 7; // GP30 persisted normal-light switch
+    optional bool allLightsEnabled = 8;          // Menu master switch; preserves every effect/color while off
 }
 
 message AddonOptions

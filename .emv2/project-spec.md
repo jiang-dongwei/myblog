@@ -124,7 +124,7 @@
 
 ### GP30 短按持久化开关普通灯效
 - 物理硬件: 复用 GP30 拨轮按键、GP22 Key 灯链、GP40 Base 灯链和 GP24 RGB 电源门控
-- 功能: 菜单关闭时短按 GP30 持久化关闭或恢复普通 Light Effect 与 Key Flash；菜单 All OFF 保持原覆盖行为，长按菜单不变，蓝牙 GP40 临时灯效保持现有行为
+- 功能: 菜单关闭时短按 GP30 持久化关闭或恢复普通 Light Effect 与 Key Flash；长按菜单不变。菜单灯光总开关另行持久化并优先于GP30和蓝牙GP40临时灯效
 - 讨论ID: `2026-08-07-gp30-short-press-light-toggle`
 
 ### GP33传输选择与GP34 ESP32-C6使能
@@ -212,6 +212,11 @@
 - 物理硬件: 复用GP33传输选择开关和现有128x64 OLED
 - 功能: 蓝牙档位阻止进入USB Mode并提示`Switch to USB Mode`；USB档位阻止进入Bluetooth Mode并提示`Switch to BLE Mode`。提示只临时覆盖显示，主菜单层级和选中项保持不变
 - 讨论ID: `2026-08-19-transport-aware-controller-menus`
+
+### Turn Lights Off可恢复总开关
+- 物理硬件: 复用GP22按键灯链、GP40环境灯链和GP24 RGB升压使能
+- 功能: Turn Lights Off/On通过独立持久化总开关关闭或恢复全部LED，不覆盖灯效、颜色、Button Flash、亮度或GP30状态；关闭时蓝牙状态灯也不能临时唤醒输出
+- 讨论ID: `2026-08-19-persistent-all-lights-toggle`
 
 ## 开发步骤状态
 
@@ -405,3 +410,7 @@
 | S54-B | 错误控制器菜单入口显示英文提示并保持主菜单状态 | completed | 2026-08-19-transport-aware-controller-menus |
 | S54-C | 提示超时、输入消费及正确菜单保存重启路径非编译静态验证 | completed | 2026-08-19-transport-aware-controller-menus |
 | S54-D | 用户构建烧录并验证USB/蓝牙两种档位菜单行为 | pending | 2026-08-19-transport-aware-controller-menus |
+| S55-A | 新增allLightsEnabled持久化总开关并迁移旧全黑关闭编码 | completed | 2026-08-19-persistent-all-lights-toggle |
+| S55-B | 总开关门控普通灯效、蓝牙状态灯、黑帧和GP24最终供电 | completed | 2026-08-19-persistent-all-lights-toggle |
+| S55-C | 菜单动态显示Turn Lights Off/On并完成非编译静态验证 | completed | 2026-08-19-persistent-all-lights-toggle |
+| S55-D | 用户构建烧录并验证恢复、重启保持、蓝牙状态灯和GP30语义 | pending | 2026-08-19-persistent-all-lights-toggle |

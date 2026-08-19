@@ -791,8 +791,13 @@ void DisplayAddon::drawScrollWheelMenu() {
         if (isSelected)
             gpDisplay->drawText(0, row, ">");
 
+        const char* label = table[idx].label;
+        if (level == SWMenuLevel::RGB_SUB && idx == SW_RGB_SUB_ALL_OFF_INDEX) {
+            label = g_menuRgbPowerEnabled ? "Turn Lights Off" : "Turn Lights On";
+        }
+
         // Label with 2-char indent so non-selected items align
-        gpDisplay->drawText(isSelected ? 1 : 2, row, table[idx].label);
+        gpDisplay->drawText(isSelected ? 1 : 2, row, label);
 
         // "*" in rightmost column marks the currently-active setting
         if (isActive)

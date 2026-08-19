@@ -1,0 +1,18 @@
+{
+  "discussion_id": "2026-08-19-persistent-all-lights-toggle",
+  "created_at": "2026-08-19",
+  "current_phase": 5,
+  "phases": {
+    "split": "completed",
+    "requirements": "completed",
+    "hardware": "completed",
+    "brainstorm": "completed",
+    "milestones": "completed"
+  },
+  "subsystems": [
+    "persistent LED master switch",
+    "ambient LED output gate",
+    "scrollwheel menu label"
+  ],
+  "current_subsystem": 2
+}

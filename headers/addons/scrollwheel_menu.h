@@ -99,6 +99,7 @@ enum class SWTransportModePrompt : uint8_t {
 };
 
 static constexpr uint8_t SW_BATTERY_PAGE_COUNT = 4;
+static constexpr uint8_t SW_RGB_SUB_ALL_OFF_INDEX = 4;
 
 struct SWMenuItem {
     const char* label;
@@ -186,18 +187,20 @@ extern volatile uint8_t g_menuRgbEffectColor; // shared GP22/GP40 effect color
 extern volatile uint8_t g_menuRgbButton;  // button-press flash color
 
 // ── Shared RGB effect override set from the menu ────────────────────────
-// Uses SWLightEffect. 0xFF is reserved for the persisted all-off state.
+// Uses SWLightEffect. 0xFF remains a legacy/uninitialized value; the current
+// all-lights state is stored independently and never overwrites this effect.
 extern volatile uint8_t g_menuLightEffect;
 
-// Runtime request for the shared GP22/GP40 RGB power rail.  The menu only
+// Persisted master request for every GP22/GP40 LED output. The menu only
 // changes this request; FightpadAmbientLEDAddon remains the sole GP24 writer.
-// "Turn Lights Off" clears it and selecting a visible color/effect sets it again.
+// Unlike the GP30 normal-effect switch, false also suppresses Bluetooth status
+// feedback without overwriting any effect, color, flash, or brightness value.
 extern volatile bool g_menuRgbPowerEnabled;
 
 // Persisted GP30 master switch for normal Lighting Effect and Button Flash output.
-// It is intentionally separate from the menu's existing Turn Lights Off
-// state. Bluetooth GP40 status feedback may still request temporary light
-// output while this switch is false.
+// It is intentionally separate from the menu all-lights master switch.
+// Bluetooth GP40 status feedback may still request temporary light output while
+// this switch is false, provided the all-lights master remains enabled.
 extern volatile bool g_manualLightEffectsEnabled;
 
 // One-shot RAM-only blackout used to make a pending Controller Type reboot

@@ -13,7 +13,6 @@
 // ── Menu data tables ─────────────────────────────────────────────────────
 
 static constexpr uint8_t RGB_SUB_CUSTOM_THEME_INDEX = 2;
-static constexpr uint8_t RGB_SUB_ALL_OFF_INDEX = 4;
 static constexpr uint8_t BRIGHTNESS_LEVEL_COUNT = 3;
 static constexpr uint32_t GAMEPLAY_INPUT_RELEASE_MS = 30;
 
@@ -293,7 +292,7 @@ void ScrollWheelMenuAddon::setup() {
     const uint8_t storedFlash = static_cast<uint8_t>(opts.buttonFlashColorIndex);
     const uint8_t storedButtonEffect = static_cast<uint8_t>(opts.buttonEffectIndex);
     const uint8_t storedAmbientEffect = static_cast<uint8_t>(opts.ambientEffectIndex);
-    const bool persistedAllOff =
+    const bool legacyPersistedAllOff =
         storedTop == 0 &&
         storedBottom == 0 &&
         storedFlash == 0 &&
@@ -304,8 +303,14 @@ void ScrollWheelMenuAddon::setup() {
     g_menuRgbEffectColor = sharedColor;
     g_menuRgbButton = storedFlash;
 
-    if (persistedAllOff) {
-        g_menuLightEffect = LIGHT_EFFECT_UNSET;
+    if (legacyPersistedAllOff) {
+        // Old firmware encoded Turn Lights Off by destroying the selected
+        // colors/effects. The original values cannot be reconstructed, so keep
+        // the device off but prepare a visible, safe restore value for the
+        // first Turn Lights On action.
+        g_menuRgbEffectColor = 1; // White
+        g_menuRgbButton = 1;      // White
+        g_menuLightEffect = LIGHT_EFFECT_STATIC_COLOR;
     } else {
         g_menuLightEffect = legacyButtonEffectToLightEffect(storedButtonEffect);
         if (g_menuLightEffect == LIGHT_EFFECT_UNSET) {
@@ -320,9 +325,15 @@ void ScrollWheelMenuAddon::setup() {
         : 0;
     g_manualLightEffectsEnabled = opts.manualLightEffectsEnabled;
 
-    // "Turn Lights Off" is persisted as three black colors plus two unset legacy
-    // effects. Reconstruct the rail request without changing protobuf layout.
-    g_menuRgbPowerEnabled = !persistedAllOff;
+    // New firmware stores the master switch independently. Preserve the old
+    // destructive all-off encoding as OFF until the user explicitly restores
+    // the safe values prepared above.
+    g_menuRgbPowerEnabled = legacyPersistedAllOff
+        ? false
+        : opts.allLightsEnabled;
+    if (legacyPersistedAllOff) {
+        opts.allLightsEnabled = false;
+    }
 
     printf("[ScrollWheel] Setup OK. Pins: SW=%d A=%d B=%d\n",
            SCROLLWHEEL_PIN_SW, SCROLLWHEEL_PIN_A, SCROLLWHEEL_PIN_B);
@@ -382,6 +393,7 @@ static void persistConfig() {
     opts.ambientEffectIndex    = lightEffectToLegacyAmbientEffect(g_menuLightEffect);
     opts.brightnessLevel       = g_menuBrightnessLevel;
     opts.manualLightEffectsEnabled = g_manualLightEffectsEnabled;
+    opts.allLightsEnabled      = g_menuRgbPowerEnabled;
     EventManager::getInstance().triggerEvent(new GPStorageSaveEvent(false));
 }
 
@@ -481,13 +493,11 @@ void ScrollWheelMenuAddon::navSelect() {
         return;
     }
 
-    // RGB_SUB "Turn Lights Off": immediate action — turn off all LEDs.
-    // Reset colors to black and persist both legacy effects as unset.
-    if (currentLevel == SWMenuLevel::RGB_SUB && idx == RGB_SUB_ALL_OFF_INDEX) {
-        g_menuRgbEffectColor = 0;
-        g_menuRgbButton = 0;
-        g_menuLightEffect = LIGHT_EFFECT_UNSET;
-        g_menuRgbPowerEnabled = false;
+    // RGB_SUB master switch: turn every LED output off without touching the
+    // configured effect/color/flash/brightness values; the next press restores
+    // those exact values, including across a reboot.
+    if (currentLevel == SWMenuLevel::RGB_SUB && idx == SW_RGB_SUB_ALL_OFF_INDEX) {
+        g_menuRgbPowerEnabled = !g_menuRgbPowerEnabled;
         persistConfig();
         markMenuDirty();
         return;

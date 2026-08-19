@@ -332,8 +332,8 @@ void FightpadAmbientLEDAddon::process() {
     updateButtonFlash(now);
 #if !FIGHTPAD12SLIM_AMBIENT_DIP_SELECTOR_MODE
     // GP30's runtime switch gates only normal Key/Base effects. Bluetooth
-    // status feedback remains an independent temporary GP40 power request in
-    // render()/show(), and low-battery cutoff remains the final override.
+    // status feedback may bypass GP30, but never the all-lights master switch;
+    // low-battery cutoff remains the final override.
     enabled = g_menuRgbPowerEnabled &&
         g_manualLightEffectsEnabled &&
         !g_scrollWheelRebootBlackout;
@@ -556,6 +556,13 @@ void FightpadAmbientLEDAddon::render(uint32_t now) {
         return;
     }
 
+    // The menu master switch is stronger than the GP30 normal-effect switch:
+    // it suppresses both normal Key/Base output and transient Bluetooth status
+    // feedback while leaving all selected settings intact for restoration.
+    if (!g_menuRgbPowerEnabled) {
+        return;
+    }
+
     FightpadESP32BluetoothStatusEvent bluetoothEvent = {};
     const bool bluetoothStatusActive =
         getFightpadESP32BluetoothStatusEvent(bluetoothEvent) &&
@@ -566,8 +573,9 @@ void FightpadAmbientLEDAddon::render(uint32_t now) {
     }
 
     // Bluetooth status is a transient GP40-only render override.  It does not
-    // alter menu/Flash values or the normal Base animation state.  GP22 keeps
-    // rendering normally when RGB is enabled and remains black during All OFF.
+    // alter menu/Flash values or the normal Base animation state. GP22 keeps
+    // rendering normally when output is enabled; the all-lights master gate
+    // above prevents this branch from running while everything is off.
     if (bluetoothStatusActive) {
         renderBluetoothStatusAmbient(
             static_cast<uint8_t>(bluetoothEvent.status),
@@ -944,7 +952,8 @@ void FightpadAmbientLEDAddon::show() {
     // Final writer guard: setup/diagnostic paths can call show() without first
     // passing through render().  A disabled menu request and the <=7% battery
     // cutoff both send one final black frame before GP24 is pulled inactive.
-    const bool outputEnabled = !g_scrollWheelRebootBlackout &&
+    const bool outputEnabled = g_menuRgbPowerEnabled &&
+        !g_scrollWheelRebootBlackout &&
         (enabled || bluetoothStatusLightRequired) &&
         !FightpadBQ27220BatteryAddon::isLowBatteryLightCutoffActive();
     if (!outputEnabled) {

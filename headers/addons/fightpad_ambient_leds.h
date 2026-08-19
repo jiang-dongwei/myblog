@@ -241,8 +241,9 @@ private:
     bool enabled = FIGHTPAD12SLIM_AMBIENT_BOOT_ENABLE != 0;
     // True is also the safe fallback for boards without a controllable rail.
     bool boostPowerEnabled = true;
-    // Connecting/Pairing/Connected can temporarily request GP40 power even
-    // when the saved RGB mode is All OFF. Low-battery cutoff still wins.
+    // Connecting/Pairing/Connected can temporarily request GP40 power while
+    // GP30 has disabled normal effects. The persisted all-lights master switch
+    // and low-battery cutoff still win.
     bool bluetoothStatusLightRequired = false;
 
     // ── Effect animation state ──────────────────────────────

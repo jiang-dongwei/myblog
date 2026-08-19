@@ -1012,3 +1012,16 @@ Base Effect 和 Key Effect 都需要同时提供两个呼吸灯入口：
 ### 讨论ID
 
 `2026-08-19-transport-aware-controller-menus`
+
+## 2026-08-19: Turn Lights Off可恢复总开关 (S55)
+
+- 审计确认旧`Turn Lights Off`会把三个颜色写成黑色、两个灯效写成0xFF并保存，原配置被销毁，第二次点击无法恢复；蓝牙状态灯还可绕过该关闭状态临时点亮GP40。
+- 在`FightpadAmbientLEDOptions`增加字段8 `allLightsEnabled`，旧配置缺少该字段时默认开启；菜单保存总开关时不再修改颜色、效果、Button Flash、亮度或GP30普通灯效开关。
+- 菜单项根据当前总开关动态显示`Turn Lights Off`或`Turn Lights On`；再次选择恢复关闭前的完整配置，断电重启后开关状态保持。
+- 总开关在`render()`蓝牙状态分支之前和`show()`最终供电判断中双层门控，确保GP22、GP40、Button Flash、蓝牙配对/连接状态灯和GP24均关闭；GP30仍只控制普通灯效。
+- 旧版全黑/0xFF破坏性关闭编码无法还原历史原值，迁移时保持关闭并在RAM准备静态白色，首次Turn Lights On后保存为安全可见配置。
+- 更新Fightpad板级README和RGB子系统文档；完成字段编号、默认初始化、菜单索引、非破坏性保存、渲染与GP24路径的非编译静态检查，构建烧录由用户完成。
+
+### 讨论ID
+
+`2026-08-19-persistent-all-lights-toggle`

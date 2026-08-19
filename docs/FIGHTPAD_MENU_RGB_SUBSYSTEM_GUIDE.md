@@ -60,7 +60,7 @@ FightpadAmbientLEDAddon（Core0）
 | GP19 | 返回上一级；板级按键名为 A2/BACK | `SCROLLWHEEL_PIN_BACK` |
 | GP22 | 12 颗按键 WS2812，`frame_gp22[12]` | PIO2 SM1，GRB |
 | GP40 | 19 颗底部/环境 WS2812，`frame[19]` | PIO2 SM0，GRB |
-| GP24 | FP6276 的 RGB 5V Boost 使能 | 高电平启用，All OFF/低电时可拉低 |
+| GP24 | FP6276 的 RGB 5V Boost 使能 | 高电平启用，灯光总开关关闭/低电时可拉低 |
 | GP00/GP01 | SSD1306 OLED I2C | Core1 的 DisplayAddon 使用 |
 
 当前板级宏位于 [`BoardConfig.h`](../configs/Fightpad12Slim/BoardConfig.h#L126)：
@@ -156,7 +156,7 @@ MAIN
    │  └─ Rainbow ──────────────────► 立即应用效果编号 4
    ├─ Brightness ──────────────────► BRIGHTNESS
    │  └─ Bright(0) / Normal(1) / Dim(2)
-   └─ All OFF ─────────────────────► 立即执行，不进入下一级
+   └─ Turn Lights Off/On ──────────► 切换持久化总开关，不进入下一级
 ```
 
 `SCROLLWHEEL_BATTERY_INFO_MENU_ENABLED=0` 只移除了 `MAIN` 数组中的入口，没有删除 `BATTERY_INFO` 层级和四页绘制代码。
@@ -203,7 +203,7 @@ BTN_IDLE ───────────────► BTN_DEBOUNCE_PRESS ─
 | 函数 | 职责 |
 |---|---|
 | `navUp()` / `navDown()` | 循环移动光标，并修正滚动窗口 |
-| `navSelect()` | 进入子层、立即应用颜色/效果/亮度、翻电池页或执行 All OFF |
+| `navSelect()` | 进入子层、立即应用颜色/效果/亮度、翻电池页或切换灯光总开关 |
 | `navBack()` | 按当前层级回到明确的父层，并恢复父层光标 |
 | `navToggle()` | 长按时进入 MAIN，或直接退出整套菜单 |
 
@@ -212,7 +212,7 @@ BTN_IDLE ───────────────► BTN_DEBOUNCE_PRESS ─
 1. **导航动作**：进入 `RGB_SUB`、颜色表或效果表。
 2. **立即应用动作**：Gradient、Rainbow、Chase、Brightness。
 3. **应用并停留**：选择颜色或亮度后保持在当前列表，便于实时比较。
-4. **全局动作**：All OFF 同时修改颜色、效果和电源请求。
+4. **全局动作**：Turn Lights Off/On只切换独立总开关，不覆盖颜色、效果、闪光或亮度。
 
 ### 4.7 菜单状态如何跨核显示
 
@@ -323,12 +323,7 @@ Storage::save(false) → ConfigUtils::save() → FlashPROM
 
 使用事件延后保存，避免在菜单或 LED 渲染热路径中直接擦写 Flash。
 
-`g_menuRgbPowerEnabled` 没有单独的 protobuf 字段。启动时通过以下组合重建 All OFF：
-
-```text
-Top=Black && Bottom=Black && Flash=Black
-&& ButtonEffect=0xFF && AmbientEffect=0xFF
-```
+`g_menuRgbPowerEnabled`通过`FightpadAmbientLEDOptions.allLightsEnabled`独立持久化，默认开启。旧版的“三个黑色+两个0xFF效果”关闭编码只用于迁移识别；旧值无法还原时准备静态白色作为首次恢复兜底。
 
 ### 5.4 20 ms RGB 主循环
 
@@ -426,20 +421,17 @@ now < gp22FlashUntil[led] ? flashColor@0.8 : 当前基础效果
 
 所以选择 Dim 后，如果按键闪光或 Chase 看起来仍然很亮，这是当前设计，而不是亮度菜单失效。
 
-### 5.9 All OFF、低电保护与 GP24
+### 5.9 灯光总开关、低电保护与 GP24
 
-#### All OFF
+#### Turn Lights Off/On
 
-菜单动作同时执行：
+菜单动作只执行：
 
 ```cpp
-g_menuRgbTop = 0;
-g_menuRgbBottom = 0;
-g_menuRgbButton = 0;
-g_menuButtonEffect = 0xFF;
-g_menuAmbientEffect = 0xFF;
-g_menuRgbPowerEnabled = false;
+g_menuRgbPowerEnabled = !g_menuRgbPowerEnabled;
 ```
+
+随后保存`allLightsEnabled`。当前颜色、灯效、Button Flash、亮度和GP30普通灯效开关都保持不变；总开关关闭时，普通灯效和蓝牙状态灯都不能重新唤醒GP24。
 
 #### 低电保护
 
@@ -465,7 +457,7 @@ BQ27220 发布 `SOC <= 7%` 原子状态。RGB Addon 将它视为比菜单设置�
   └─ 发送恢复后的第一帧
 ```
 
-选择单个颜色列表中的 `OFF` 只会把对应颜色设为黑色，不一定关闭 GP24。只有 `All OFF` 或低电保护会提出总关闭请求。
+选择单个颜色列表中的 `OFF` 只会把对应颜色设为黑色，不一定关闭 GP24。只有`Turn Lights Off`总开关或低电保护会提出总关闭请求。
 
 ## 6. 四个端到端例子
 
@@ -520,18 +512,18 @@ GP30短按 Normal
   → 仅指定效果分支使用新倍率
 ```
 
-### 6.4 选择 All OFF，再选择 Rainbow
+### 6.4 关闭灯光，再恢复灯光
 
 ```text
-All OFF
+Turn Lights Off
   → 两条灯链发送黑帧
   → GP24 拉低
+  → 原颜色、效果、闪光和亮度仍保存在Flash
 
-选择 Key Rainbow
-  → g_menuButtonEffect = 1
+Turn Lights On
   → g_menuRgbPowerEnabled = true
   → 下一次 show() 先拉高 GP24并等待5ms
-  → 再发送 Key Rainbow 帧
+  → 再发送关闭前的灯效帧
 ```
 
 ## 7. 动画状态之间的耦合
@@ -618,7 +610,7 @@ All OFF
 7. 动态效果如果需要动画状态，决定是复用状态还是新建独立状态；优先避免与 Base 速度耦合。
 8. 决定切换到该效果时是否要清空静态颜色；只有 Chase 这类完全接管颜色的效果才需要。
 9. 验证 OLED 的 `*` 是否能按 `targetIndex` 标记正确行。
-10. 验证保存、重启恢复、All OFF 后恢复和低电保护。
+10. 验证保存、重启恢复、总开关关闭/开启和低电保护。
 
 不要把“菜单行号”直接当成效果编号，否则插入或调整菜单顺序后，旧 Flash 配置会指向错误效果。
 
@@ -640,8 +632,8 @@ All OFF
 - Gradient 是全灯同步变色，Rainbow 是逐灯不同相位。
 - Key Flash 只覆盖被按下的对应 LED，持续约 80 ms。
 - Bright/Normal/Dim 不应改变 Chase、Breathing 和 Flash 的设计亮度。
-- All OFF 先熄灭两条灯链，再测量 GP24 应为低电平。
-- 从 All OFF 选择可见效果后，GP24 恢复高电平且第一帧正常。
+- Turn Lights Off先熄灭两条灯链，再测量GP24应为低电平。
+- Turn Lights On后GP24恢复高电平，且第一帧恢复关闭前的效果。
 - SOC 从 8% 降到 7% 时关灯，恢复到 8% 后恢复原配置。
 - 重启后颜色、效果和亮度恢复一致。
 
@@ -655,7 +647,7 @@ All OFF
 | RGB 改了但重启丢失 | `persistConfig()`、保存事件和 `Storage::save(false)` 返回条件 |
 | 效果函数正确但灯不对 | `available()`、Addon 所有权、`show()` 前最后一次帧覆盖 |
 | 只有 Key Flash 不对 | `LEDS_BUTTON_*` 映射和 `gp22FlashUntil[]` |
-| All OFF 灯黑但 GP24 仍高 | `g_menuRgbPowerEnabled → enabled → show() → setBoostPower(false)` |
+| Turn Lights Off后灯黑但GP24仍高 | `g_menuRgbPowerEnabled → enabled → show() → setBoostPower(false)` |
 | 低电恢复后配置丢失 | 不应修改菜单配置；检查是否只做了瞬时 render override |
 
 掌握这条主线后，再修改菜单或 RGB 时，应始终按“输入事件 → 菜单状态 → 持久化配置 → 效果选择 → 帧缓冲 → 最终写入者 → 电源门控”的顺序检查。
