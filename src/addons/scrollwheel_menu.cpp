@@ -80,22 +80,22 @@ uint8_t lightEffectToLegacyAmbientEffect(uint8_t effect) {
 } // namespace
 
 const SWMenuItem kMenuMainUsb[] = {
-    { "Device Info",        SWMenuLevel::INFO, 0 },
-    { "Bluetooth Info",     SWMenuLevel::INFO, 0 },
-#if SCROLLWHEEL_BATTERY_INFO_MENU_ENABLED
-    { "Battery Details",    SWMenuLevel::BATTERY_INFO, 0 },
-#endif
     { "Lighting",           SWMenuLevel::RGB_SUB, 0 },
     { "Controller Mode",    SWMenuLevel::CONTROLLER_TYPE, 0 },
-};
-const SWMenuItem kMenuMainBluetooth[] = {
-    { "Device Info",        SWMenuLevel::INFO, 0 },
-    { "Bluetooth Info",     SWMenuLevel::INFO, 0 },
 #if SCROLLWHEEL_BATTERY_INFO_MENU_ENABLED
     { "Battery Details",    SWMenuLevel::BATTERY_INFO, 0 },
 #endif
+    { "Device Info",        SWMenuLevel::INFO, SW_MAIN_INFO_DEVICE },
+    { "Bluetooth Info",     SWMenuLevel::INFO, SW_MAIN_INFO_BLUETOOTH },
+};
+const SWMenuItem kMenuMainBluetooth[] = {
     { "Lighting",           SWMenuLevel::RGB_SUB, 0 },
     { "Controller Mode",    SWMenuLevel::BLUETOOTH_TYPE, 0 },
+#if SCROLLWHEEL_BATTERY_INFO_MENU_ENABLED
+    { "Battery Details",    SWMenuLevel::BATTERY_INFO, 0 },
+#endif
+    { "Device Info",        SWMenuLevel::INFO, SW_MAIN_INFO_DEVICE },
+    { "Bluetooth Info",     SWMenuLevel::INFO, SW_MAIN_INFO_BLUETOOTH },
 };
 const uint8_t kMenuMainCount = sizeof(kMenuMainUsb) / sizeof(kMenuMainUsb[0]);
 static_assert(
@@ -131,14 +131,43 @@ const SWMenuItem kMenuBluetoothTypes[] = {
 const uint8_t kMenuBluetoothTypesCount =
     sizeof(kMenuBluetoothTypes) / sizeof(kMenuBluetoothTypes[0]);
 
-const SWMenuItem kMenuRgbSub[] = {
+const SWMenuItem kMenuRgbSubWithCustomTheme[] = {
     { "Button Flash",     SWMenuLevel::COLOR,  0 },
     { "Lighting Effect",  SWMenuLevel::LIGHT_EFFECT, 0 },
     { "Custom Theme",     SWMenuLevel::INFO, LIGHT_EFFECT_CUSTOM_THEME },
     { "Brightness",       SWMenuLevel::BRIGHTNESS, 0 },
     { "Turn Lights Off",  SWMenuLevel::INFO,   0 },  // immediate action, no sub-level
 };
-const uint8_t kMenuRgbSubCount = sizeof(kMenuRgbSub) / sizeof(kMenuRgbSub[0]);
+const SWMenuItem kMenuRgbSubWithoutCustomTheme[] = {
+    { "Button Flash",     SWMenuLevel::COLOR,  0 },
+    { "Lighting Effect",  SWMenuLevel::LIGHT_EFFECT, 0 },
+    { "Brightness",       SWMenuLevel::BRIGHTNESS, 0 },
+    { "Turn Lights Off",  SWMenuLevel::INFO,   0 },  // immediate action, no sub-level
+};
+const uint8_t kMenuRgbSubWithCustomThemeCount =
+    sizeof(kMenuRgbSubWithCustomTheme) / sizeof(kMenuRgbSubWithCustomTheme[0]);
+const uint8_t kMenuRgbSubWithoutCustomThemeCount =
+    sizeof(kMenuRgbSubWithoutCustomTheme) / sizeof(kMenuRgbSubWithoutCustomTheme[0]);
+
+bool isScrollWheelCustomThemeEnabled() {
+    return Storage::getInstance().getAnimationOptions().hasCustomTheme;
+}
+
+const SWMenuItem* getScrollWheelRgbSubMenuTable() {
+    return isScrollWheelCustomThemeEnabled()
+        ? kMenuRgbSubWithCustomTheme
+        : kMenuRgbSubWithoutCustomTheme;
+}
+
+uint8_t getScrollWheelRgbSubMenuCount() {
+    return isScrollWheelCustomThemeEnabled()
+        ? kMenuRgbSubWithCustomThemeCount
+        : kMenuRgbSubWithoutCustomThemeCount;
+}
+
+uint8_t getScrollWheelRgbSubAllOffIndex() {
+    return getScrollWheelRgbSubMenuCount() - 1;
+}
 
 // COLOR items use `targetIndex` to carry the AnimationStation `colors`
 // vector index so that the shared effect/flash values match proto
@@ -377,7 +406,7 @@ void ScrollWheelMenuAddon::setup() {
 const SWMenuItem* ScrollWheelMenuAddon::currentMenuTable() const {
     switch (static_cast<SWMenuLevel>(g_menuState.level)) {
         case SWMenuLevel::MAIN:           return getScrollWheelMainMenuTable();
-        case SWMenuLevel::RGB_SUB:        return kMenuRgbSub;
+        case SWMenuLevel::RGB_SUB:        return getScrollWheelRgbSubMenuTable();
         case SWMenuLevel::COLOR:
         case SWMenuLevel::COLOR_EFFECT:
         case SWMenuLevel::COLOR_EFFECT_BREATH:
@@ -395,7 +424,7 @@ const SWMenuItem* ScrollWheelMenuAddon::currentMenuTable() const {
 uint8_t ScrollWheelMenuAddon::currentItemCount() const {
     switch (static_cast<SWMenuLevel>(g_menuState.level)) {
         case SWMenuLevel::MAIN:           return kMenuMainCount;
-        case SWMenuLevel::RGB_SUB:        return kMenuRgbSubCount;
+        case SWMenuLevel::RGB_SUB:        return getScrollWheelRgbSubMenuCount();
         case SWMenuLevel::COLOR:
         case SWMenuLevel::COLOR_EFFECT:
         case SWMenuLevel::COLOR_EFFECT_BREATH:
@@ -434,7 +463,7 @@ static void clampScrollOffset() {
     uint8_t count = 0;
     switch (static_cast<SWMenuLevel>(g_menuState.level)) {
         case SWMenuLevel::MAIN:           count = kMenuMainCount; break;
-        case SWMenuLevel::RGB_SUB:        count = kMenuRgbSubCount; break;
+        case SWMenuLevel::RGB_SUB:        count = getScrollWheelRgbSubMenuCount(); break;
         case SWMenuLevel::COLOR:
         case SWMenuLevel::COLOR_EFFECT:
         case SWMenuLevel::COLOR_EFFECT_BREATH:
@@ -447,10 +476,17 @@ static void clampScrollOffset() {
         case SWMenuLevel::BATTERY_INFO:   count = SW_BATTERY_PAGE_COUNT; break;
         default: return;
     }
+    if (count == 0) return;
+    if (g_menuState.index >= count)
+        g_menuState.index = count - 1;
     if (g_menuState.scrollOffset > g_menuState.index)
         g_menuState.scrollOffset = g_menuState.index;
     if (g_menuState.index >= g_menuState.scrollOffset + 6)
         g_menuState.scrollOffset = g_menuState.index - 5;
+    if (count <= 6)
+        g_menuState.scrollOffset = 0;
+    else if (g_menuState.scrollOffset > count - 6)
+        g_menuState.scrollOffset = count - 6;
 }
 
 // ── Navigation ───────────────────────────────────────────────────────────
@@ -513,7 +549,8 @@ void ScrollWheelMenuAddon::navSelect() {
     // RGB_SUB master switch: turn every LED output off without touching the
     // configured effect/color/flash/brightness values; the next press restores
     // those exact values, including across a reboot.
-    if (currentLevel == SWMenuLevel::RGB_SUB && idx == SW_RGB_SUB_ALL_OFF_INDEX) {
+    if (currentLevel == SWMenuLevel::RGB_SUB &&
+        idx == getScrollWheelRgbSubAllOffIndex()) {
         g_menuRgbPowerEnabled = !g_menuRgbPowerEnabled;
         persistConfig();
         markMenuDirty();
@@ -654,20 +691,8 @@ void ScrollWheelMenuAddon::navSelect() {
     // supplies both the normal and pressed button colors. Keep its runtime and
     // persisted effect ID unchanged; only its menu placement changes.
     if (currentLevel == SWMenuLevel::RGB_SUB &&
+        isScrollWheelCustomThemeEnabled() &&
         idx == RGB_SUB_CUSTOM_THEME_INDEX) {
-        // Disabling the Web Config theme prevents a new activation, but an
-        // already-running Custom Theme remains valid across reboot.
-        if (!Storage::getInstance().getAnimationOptions().hasCustomTheme &&
-            g_menuLightEffect != LIGHT_EFFECT_CUSTOM_THEME) {
-            customThemePromptUntil =
-                getMillis() + SCROLLWHEEL_CUSTOM_THEME_PROMPT_MS;
-            g_menuState.level = static_cast<uint8_t>(
-                SWMenuLevel::CUSTOM_THEME_UNDEFINED);
-            g_menuState.scrollOffset = 0;
-            markMenuDirty();
-            return;
-        }
-
         g_menuLightEffect = LIGHT_EFFECT_CUSTOM_THEME;
         g_menuRgbPowerEnabled = true;
         g_manualLightEffectsEnabled = true;
@@ -701,7 +726,9 @@ void ScrollWheelMenuAddon::navSelect() {
             g_menuState.infoSource = 1;
         }
         g_menuState.level = static_cast<uint8_t>(SWMenuLevel::INFO);
-        g_menuState.index = idx;
+        g_menuState.index = (currentLevel == SWMenuLevel::MAIN)
+            ? item.targetIndex
+            : idx;
         g_menuState.scrollOffset = 0;
     } else {
         if (currentLevel == SWMenuLevel::MAIN)
@@ -999,7 +1026,7 @@ void ScrollWheelMenuAddon::process() {
                 (level == SWMenuLevel::CONTROLLER_TYPE && bluetoothSelected) ||
                 (level == SWMenuLevel::BLUETOOTH_TYPE && !bluetoothSelected);
             if (inactiveControllerMenu) {
-                mainIndex = kMenuMainCount - 1;
+                mainIndex = SW_MAIN_CONTROLLER_MODE_INDEX;
                 g_menuState.level = static_cast<uint8_t>(SWMenuLevel::MAIN);
                 g_menuState.index = mainIndex;
                 g_menuState.scrollOffset = 0;

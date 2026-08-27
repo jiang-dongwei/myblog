@@ -26,6 +26,8 @@ namespace
     static constexpr uint8_t BATTERY_PERCENT_PIXEL_Y = BATTERY_PERCENT_TEXT_ROW * 8;
     static constexpr uint8_t BATTERY_PERCENT_PIXEL_WIDTH = 26;
     static constexpr uint8_t BATTERY_PERCENT_PIXEL_HEIGHT = 8;
+    static constexpr uint8_t TRANSPORT_MODE_TEXT_COLUMN = 8;
+    static constexpr uint8_t TRANSPORT_MODE_TEXT_ROW = 0;
 
     const char* getActiveBluetoothControllerLabel(FightpadBluetoothProfile profile)
     {
@@ -185,6 +187,21 @@ namespace
         renderer->drawText(BATTERY_PERCENT_TEXT_COLUMN, BATTERY_PERCENT_TEXT_ROW, percentText);
 #endif
     }
+
+    void drawFightpadTransportMode(GPGFX* renderer)
+    {
+#if FIGHTPAD12SLIM_ESP32_PROXY_ENABLED
+        bool bluetoothSelected = false;
+        getFightpadESP32BluetoothTransportSelected(bluetoothSelected);
+        renderer->drawText(
+            TRANSPORT_MODE_TEXT_COLUMN,
+            TRANSPORT_MODE_TEXT_ROW,
+            bluetoothSelected ? "BT " : "USB");
+#else
+        (void)renderer;
+#endif
+    }
+
     std::string getFixedWidthNumber(uint32_t value, uint8_t width)
     {
         std::string text = std::to_string(value);
@@ -580,6 +597,7 @@ void ButtonLayoutScreen::drawScreen() {
             displayStatus.resize(BATTERY_STATUS_COLUMN);
         }
         getRenderer()->drawText(0, 0, displayStatus);
+        drawFightpadTransportMode(getRenderer());
         drawFightpadBatteryIcon(getRenderer());
 #endif
 #else

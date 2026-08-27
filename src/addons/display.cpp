@@ -640,7 +640,7 @@ void DisplayAddon::drawScrollWheelMenu() {
     // ── INFO page ──────────────────────────────────────────────────
     if (level == SWMenuLevel::INFO) {
         if (snap.infoSource == 0) {
-            if (snap.index == 0) {
+            if (snap.index == SW_MAIN_INFO_DEVICE) {
                 char infoLine[22] = {};
                 gpDisplay->drawText(0, 0, "Device Information");
 
@@ -657,7 +657,7 @@ void DisplayAddon::drawScrollWheelMenu() {
                 gpDisplay->drawText(0, 7, "Press to Go Back");
                 gpDisplay->render();
                 return;
-            } else {
+            } else if (snap.index == SW_MAIN_INFO_BLUETOOTH) {
                 FightpadESP32FirmwareInfo firmwareInfo = {};
                 char infoLine[22] = {};
                 gpDisplay->drawText(0, 0, "Bluetooth Firmware");
@@ -717,7 +717,9 @@ void DisplayAddon::drawScrollWheelMenu() {
         case SWMenuLevel::MAIN:
             table = getScrollWheelMainMenuTable(); count = kMenuMainCount; break;
         case SWMenuLevel::RGB_SUB:
-            table = kMenuRgbSub; count = kMenuRgbSubCount; break;
+            table = getScrollWheelRgbSubMenuTable();
+            count = getScrollWheelRgbSubMenuCount();
+            break;
         case SWMenuLevel::COLOR:
         case SWMenuLevel::COLOR_EFFECT:
         case SWMenuLevel::COLOR_EFFECT_BREATH:
@@ -797,7 +799,8 @@ void DisplayAddon::drawScrollWheelMenu() {
             gpDisplay->drawText(0, row, ">");
 
         const char* label = table[idx].label;
-        if (level == SWMenuLevel::RGB_SUB && idx == SW_RGB_SUB_ALL_OFF_INDEX) {
+        if (level == SWMenuLevel::RGB_SUB &&
+            idx == getScrollWheelRgbSubAllOffIndex()) {
             label = g_menuRgbPowerEnabled ? "Turn Lights Off" : "Turn Lights On";
         }
 

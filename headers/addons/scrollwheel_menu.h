@@ -67,8 +67,8 @@ static constexpr uint32_t SCROLLWHEEL_GAMEPLAY_GPIO_MASK = 0x001FFFFCu;
 // ── Menu tree definition (shared between Core0 nav and Core1 render) ─────
 
 enum class SWMenuLevel : uint8_t {
-    MAIN          = 0,  // Level 0: device, Bluetooth, battery, lighting, and controller modes
-    RGB_SUB       = 1,  // Level 1: Button Flash, Lighting Effect, Custom Theme, Brightness, Turn Lights Off
+    MAIN          = 0,  // Level 0: lighting, controller, battery, and information entries
+    RGB_SUB       = 1,  // Level 1: Lighting items; Custom Theme appears only when enabled in Web Config
     COLOR         = 2,  // Level 2: color names (Button RGB flash)
     INFO          = 3,  // Info pages (RP2350/ESP32C6)
     LIGHT_EFFECT  = 4,  // Level 2: shared GP22/GP40 effect picker
@@ -80,6 +80,18 @@ enum class SWMenuLevel : uint8_t {
     CONTROLLER_TYPE = 12, // Level 1: upstream wired USB input mode picker
     BLUETOOTH_TYPE  = 13, // Level 1: ESP32-C6 BLE HID profile picker
     CUSTOM_THEME_UNDEFINED = 14, // Temporary non-blocking warning page
+};
+
+// Stable positions for the entries that must remain at the top of both
+// transport-specific main-menu tables.
+static constexpr uint8_t SW_MAIN_LIGHTING_INDEX = 0;
+static constexpr uint8_t SW_MAIN_CONTROLLER_MODE_INDEX = 1;
+
+// INFO page IDs are carried in SWMenuItem::targetIndex so rendering does not
+// depend on where the information entries appear in the main menu.
+enum SWMainInfoPage : uint8_t {
+    SW_MAIN_INFO_DEVICE = 0,
+    SW_MAIN_INFO_BLUETOOTH = 1,
 };
 
 // Unified runtime effect IDs used by both the GP22 Key chain and GP40 Base
@@ -97,13 +109,11 @@ enum SWLightEffect : uint8_t {
 };
 
 static constexpr uint8_t SW_BATTERY_PAGE_COUNT = 4;
-static constexpr uint8_t SW_RGB_SUB_ALL_OFF_INDEX = 4;
-
 struct SWMenuItem {
     const char* label;
     SWMenuLevel targetLevel;   // Level to enter on selection, or INFO for leaf
     // For COLOR items (targetLevel==INFO): AnimationStation `colors` vector index (0..15).
-    // For non-COLOR items: pre-set index when entering that level (unused for INFO).
+    // For MAIN INFO items: SWMainInfoPage. For other non-COLOR items: pre-set index.
     uint8_t     targetIndex;
 };
 
@@ -111,8 +121,10 @@ struct SWMenuItem {
 extern const uint8_t      kMenuMainCount;
 const SWMenuItem* getScrollWheelMainMenuTable();
 
-extern const SWMenuItem kMenuRgbSub[];
-extern const uint8_t      kMenuRgbSubCount;
+const SWMenuItem* getScrollWheelRgbSubMenuTable();
+uint8_t getScrollWheelRgbSubMenuCount();
+uint8_t getScrollWheelRgbSubAllOffIndex();
+bool isScrollWheelCustomThemeEnabled();
 
 extern const SWMenuItem kMenuColors[];
 extern const uint8_t      kMenuColorsCount;
@@ -277,7 +289,7 @@ private:
     bool mainMenuBluetoothSelected = false;
 
     // Stored parent indices for BACK navigation
-    uint8_t mainIndex = 0;       // which item was selected in level 0
+    uint8_t mainIndex = SW_MAIN_LIGHTING_INDEX; // which item was selected in level 0
     uint8_t rgbSubIndex = 0;     // which item was selected in level 1
 };
 
